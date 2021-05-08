@@ -1,0 +1,36 @@
+# The following is the configuration file for the OS Project.
+
+# This is a single line comment.
+
+# Syntax is: <param_name> = <value>, where <param_name> is a character that can be followed
+# by a sequence of alphanumeric characters, and <value> can contain ANY character.
+# The value '?' means that this attribute is NOT specified.
+# Any unrecognized attribute is ignored by the parser.
+# There MUST be spaces between any variable name and its value (otherwise it is generated
+# an error) in order to simplify parsing of the file.
+
+
+#Path of the server socket
+SocketPath = ./SOL21SalvatoreCorrenti/tmp/socket 
+
+#Number of worker threads
+WorkersInPool = 4
+
+#GBytes of storage size
+StorageGBSize = 0
+
+#MBytes of storage size
+StorageMBSize = 100
+
+#KBytes of storage size
+StorageKBSize = 0
+
+
+HasLogFile = 0 #1 -> there is a log file, 1 -> no log file provided
+HasLocking = 0 #1 -> (un)lockFile is enabled, 0 -> (un)lockFile is disabled
+
+LogFilePath = ? #Unspecified
+
+
+#random words = syntax errors
+#Uncomment the line above to test syntax errors detecting
