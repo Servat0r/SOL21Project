@@ -1,19 +1,13 @@
 #if !defined(_UTIL_H)
 #define _UTIL_H
 
-#include <ctype.h>
+#include <defines.h>
 #include <stdarg.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-#include <unistd.h>
-#include <stdlib.h>
-#include <stdbool.h>
-#include <string.h>
-#include <stdio.h>
-#include <pthread.h>
 #include <errno.h>
-#include <defines.h>
+
 
 #if !defined(EXTRA_LEN_PRINT_ERROR)
 #define EXTRA_LEN_PRINT_ERROR   512

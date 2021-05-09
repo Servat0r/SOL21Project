@@ -6,13 +6,8 @@
 #if !defined(_TSQUEUE_H)
 #define _TSQUEUE_H
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <errno.h>
-#include <tsqueue.h>
-#include <pthread.h>
-#include <util.h>
-//FIXME Sostituire con <defines.h>
+#include <defines.h>
+
 
 typedef enum { Q_OPEN, Q_CLOSE } queue_state_t;
 

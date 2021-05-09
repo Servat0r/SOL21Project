@@ -1,8 +1,4 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <errno.h>
 #include <tsqueue.h>
-#include <pthread.h>
 #include <util.h>
 
 /**
@@ -46,7 +42,7 @@ static bool putShouldWait(tsqueue_t* q){
 }
 
 static bool getShouldWait(tsqueue_t* q){
-	bool res = (tsqueue_isEmpty(q) || q->activePut || q->activeGet));
+	bool res = (tsqueue_isEmpty(q) || q->activePut || q->activeGet);
 	return res;
 }
 
@@ -70,70 +66,68 @@ int tsqueue_close(tsqueue_t* q){
 */
 int tsqueue_put(tsqueue_t* q, void* elem){
 	if (!q || !elem) return -1;
-		LOCK(&q->lock);
-		if (q->state == Q_CLOSE){
-			UNLOCK(&q->lock);
-			return 1;
-		}
-		q->waitPut++;
-		while (putShouldWait(q)) pthread_cond_wait(&q->putVar, &q->lock);
-		q->waitPut--;
-		q->activePut = true;		
-		if (q->size == 0){
-			q->head = malloc(sizeof(tsqueue_node_t));
-			if (q->head == NULL){
-				UNLOCK(&q->lock);
-				return -1;
-			}
-			q->head->elem = elem;
-			q->head->next = NULL;
-			q->tail = q->head;
-			q->size = 1;
-		} else {
-			tsqueue_node_t* qn = malloc(sizeof(tsqueue_node_t));
-			if (qn == NULL){
-				UNLOCK(&q->lock);			
-				return -1;
-			}
-			qn->elem = elem;
-			q->tail->next = qn;
-			q->tail = qn;
-			q->size++;
-		}
-		q->activePut = false;
-		/* FIXME Modify as a rwlock */
-		pthread_cond_signal(&q->getVar);
-		pthread_cond_signal(&q->putVar);
+	LOCK(&q->lock);
+	if (q->state == Q_CLOSE){
 		UNLOCK(&q->lock);
+		return 1;
 	}
+	q->waitPut++;
+	while (putShouldWait(q)) pthread_cond_wait(&q->putVar, &q->lock);
+	q->waitPut--;
+	q->activePut = true;		
+	if (q->size == 0){
+		q->head = malloc(sizeof(tsqueue_node_t));
+		if (q->head == NULL){
+			UNLOCK(&q->lock);
+			return -1;
+		}
+		q->head->elem = elem;
+		q->head->next = NULL;
+		q->tail = q->head;
+		q->size = 1;
+	} else {
+		tsqueue_node_t* qn = malloc(sizeof(tsqueue_node_t));
+		if (qn == NULL){
+			UNLOCK(&q->lock);			
+			return -1;
+		}
+		qn->elem = elem;
+		q->tail->next = qn;
+		q->tail = qn;
+		q->size++;
+	}
+	q->activePut = false;
+	/* FIXME Modify as a rwlock */
+	pthread_cond_signal(&q->getVar);
+	pthread_cond_signal(&q->putVar);
+	UNLOCK(&q->lock);
 	return 0;		
 }
 
 void* tsqueue_get(tsqueue_t* q){
 	if (!q) return NULL;
-		LOCK(&q->lock);
-		q->waitGet++;
-		if (q->state == Q_CLOSE){
-			UNLOCK(&q->lock);
-			return NULL;
-		}
-		while (getShouldWait(q)) pthread_cond_wait(&q->getVar, &q->lock);
-		q->waitGet--;
-		q->activeGet = true;
-		tsqueue_node_t* qn = q->head;
-		q->head = qn->next;
-		qn->next = NULL;
-		q->size--;
-		void* res = qn->elem;
-		qn->elem = NULL;
-		free(qn);
-		q->activeGet = false;
-		/* TODO Is that okay?? */
-		pthread_cond_signal(&q->putVar);
-		pthread_cond_signal(&q->getVar);
+	LOCK(&q->lock);
+	q->waitGet++;
+	if (q->state == Q_CLOSE){
 		UNLOCK(&q->lock);
-		return res;
+		return NULL;
 	}
+	while (getShouldWait(q)) pthread_cond_wait(&q->getVar, &q->lock);
+	q->waitGet--;
+	q->activeGet = true;
+	tsqueue_node_t* qn = q->head;
+	q->head = qn->next;
+	qn->next = NULL;
+	q->size--;
+	void* res = qn->elem;
+	qn->elem = NULL;
+	free(qn);
+	q->activeGet = false;
+	/* TODO Is that okay?? */
+	pthread_cond_signal(&q->putVar);
+	pthread_cond_signal(&q->getVar);
+	UNLOCK(&q->lock);
+	return res;
 }
 
 //FIXME Modify in order to single-step-flushing the queue 

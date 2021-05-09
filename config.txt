@@ -11,7 +11,7 @@
 
 
 #Path of the server socket
-SocketPath = ./SOL21SalvatoreCorrenti/tmp/socket 
+SocketPath = bin/tmp/socket 
 
 #Number of worker threads
 WorkersInPool = 4

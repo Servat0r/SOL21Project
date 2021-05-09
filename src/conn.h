@@ -16,7 +16,7 @@
  *   \retval  0   se durante la lettura da fd leggo EOF
  *   \retval size se termina con successo
  */
-static inline int readn(long fd, void *buf, size_t size) {
+static int readn(long fd, void *buf, size_t size) {
     size_t left = size;
     int r;
     char *bufptr = (char*)buf;
@@ -38,7 +38,7 @@ static inline int readn(long fd, void *buf, size_t size) {
  *   \retval  0   se durante la scrittura la write ritorna 0
  *   \retval  1   se la scrittura termina con successo
  */
-static inline int writen(long fd, void *buf, size_t size) {
+static int writen(long fd, void *buf, size_t size) {
     size_t left = size;
     int r;
     char *bufptr = (char*)buf;
