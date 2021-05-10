@@ -50,6 +50,43 @@ bool isUseless(char* input){
 	return res;
 }
 
+/**
+ * @brief Parse string pathname to check if it is a correct pathname (absolute / relative).
+*/
+bool isPath(char* pathname){
+	if (!pathname) return false;
+	size_t clen = 0; /* Current len of parsed tokens (used for checking ONLY '/' between tokens) */
+	size_t n = strlen(pathname);
+	if (pathname[n-1] == '/') clen++; /* Case of a directory path */
+	if (pathname[0] != '/') clen--; /* Case of a NOT absolute path */
+	char* saveptr;
+	char* token;
+	token = strtok_r(pathname, "/", &saveptr);
+	bool isFirstName = true; /* Used for checking '~' */
+	while (token){
+		bool ok = false;
+		size_t m = strlen(token);
+		clen += m + 1; /* Also '/' */
+		if ((m == 1) && (token[0] == '.')) ok = true; /* Current directory */
+		else if ((m == 2) && (strncmp(token, "..", 2) == 0)) ok = true; /* Parent directory */
+		else if (isFirstName && (m == 1) && (token[0] == '~') && (pathname[0] != '/')) ok = true; /* Home directory */
+		else {
+			for (int i = 0; i < m; i++){
+				if (isalnum(token[i])) ok = true;
+				else { ok = false; break; }
+			}
+		}
+		if (!ok) return false; /* Wrong path */
+		isFirstName = false;
+		token = strtok_r(NULL, "/", &saveptr);
+	}
+	if (clen != n){
+		fprintf(stderr, "Error: uncorrect file/dir path format\n");
+		return false;
+	}
+	return true;
+}
+
 /** 
  * @brief Converts a string into uppercase.
  */

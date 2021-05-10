@@ -16,6 +16,7 @@ SocketPath = bin/tmp/socket
 #Number of worker threads
 WorkersInPool = 4
 
+#Total storage size is sum of the following fields (multiplied by 2^20, 2^10, 1)
 #GBytes of storage size
 StorageGBSize = 0
 
@@ -25,11 +26,8 @@ StorageMBSize = 100
 #KBytes of storage size
 StorageKBSize = 0
 
-
-HasLogFile = 0 #1 -> there is a log file, 1 -> no log file provided
-HasLocking = 0 #1 -> (un)lockFile is enabled, 0 -> (un)lockFile is disabled
-
-LogFilePath = ? #Unspecified
+#Path of the logging file
+LogFilePath = ? #Unspecified (ignored by the server)
 
 
 #random words = syntax errors
