@@ -176,7 +176,7 @@ int tsqueue_flush(tsqueue_t* q, void(*freeItems)(void*)){
  */
 void* tsqueue_getHead(tsqueue_t* q, void*(*copyFun)(void*, void*, size_t), size_t N){
 	if (!q) return NULL;
-	if tsqueue_isEmpty(q) return NULL;
+	if (tsqueue_isEmpty(q)) return NULL;
 	LOCK(&q->lock);
 	if (!copyFun){
 		size_t n = strlen(q->head->elem) + 1;
