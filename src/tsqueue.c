@@ -48,13 +48,21 @@ static bool getShouldWait(tsqueue_t* q){
 
 int tsqueue_open(tsqueue_t* q){
 	if (!q) return -1;
+	LOCK(&q->lock);
 	q->state = Q_OPEN;
+	pthread_cond_broadcast(&q->putVar);
+	pthread_cond_broadcast(&q->getVar);
+	UNLOCK(&q->lock);
 	return 0;
 }
 
 int tsqueue_close(tsqueue_t* q){
 	if (!q) return -1;
+	LOCK(&q->lock);
 	q->state = Q_CLOSE;
+	pthread_cond_broadcast(&q->putVar);
+	pthread_cond_broadcast(&q->getVar);
+	UNLOCK(&q->lock);
 	return 0;
 }
 
@@ -67,13 +75,13 @@ int tsqueue_close(tsqueue_t* q){
 int tsqueue_put(tsqueue_t* q, void* elem){
 	if (!q || !elem) return -1;
 	LOCK(&q->lock);
-	if (q->state == Q_CLOSE){
+	q->waitPut++;
+	while ((q->state == Q_OPEN) && putShouldWait(q)) pthread_cond_wait(&q->putVar, &q->lock);
+	q->waitPut--;
+	if (q->state == Q_CLOSE){ /* NO more items to insert */
 		UNLOCK(&q->lock);
 		return 1;
 	}
-	q->waitPut++;
-	while (putShouldWait(q)) pthread_cond_wait(&q->putVar, &q->lock);
-	q->waitPut--;
 	q->activePut = true;		
 	if (q->size == 0){
 		q->head = malloc(sizeof(tsqueue_node_t));
@@ -98,77 +106,86 @@ int tsqueue_put(tsqueue_t* q, void* elem){
 	}
 	q->activePut = false;
 	/* FIXME Modify as a rwlock */
-	pthread_cond_signal(&q->getVar);
-	pthread_cond_signal(&q->putVar);
+	if (q->waitGet > 0) pthread_cond_broadcast(&q->getVar);
+	else pthread_cond_broadcast(&q->putVar);
 	UNLOCK(&q->lock);
 	return 0;		
 }
 
-void* tsqueue_get(tsqueue_t* q){
-	if (!q) return NULL;
+int tsqueue_get(tsqueue_t* q, void* res){
+	if (!q) return -1;
 	LOCK(&q->lock);
 	q->waitGet++;
-	if (q->state == Q_CLOSE){
-		UNLOCK(&q->lock);
-		return NULL;
-	}
-	while (getShouldWait(q)) pthread_cond_wait(&q->getVar, &q->lock);
+	while ((q->state == Q_OPEN) && getShouldWait(q)) pthread_cond_wait(&q->getVar, &q->lock);
 	q->waitGet--;
+	if ((q->state == Q_CLOSE) && (tsqueue_isEmpty(q))){ /* NO more items to consume */
+		UNLOCK(&q->lock);
+		return 1;
+	}
 	q->activeGet = true;
 	tsqueue_node_t* qn = q->head;
 	q->head = qn->next;
 	qn->next = NULL;
 	q->size--;
-	void* res = qn->elem;
+	res = qn->elem;
 	qn->elem = NULL;
 	free(qn);
 	q->activeGet = false;
 	/* TODO Is that okay?? */
-	pthread_cond_signal(&q->putVar);
-	pthread_cond_signal(&q->getVar);
+	if (q->waitPut > 0) pthread_cond_broadcast(&q->putVar);
+	else pthread_cond_broadcast(&q->getVar);
 	UNLOCK(&q->lock);
-	return res;
+	return 0;
 }
 
-//FIXME Modify in order to single-step-flushing the queue 
-void** tsqueue_flush(tsqueue_t* q){
 
+int tsqueue_flush(tsqueue_t* q, void(*freeItems)(void*)){
+
+	if (!q) return -1;
+	if (!freeItems) freeItems = free;
+	
 	LOCK(&q->lock);
 	int n = tsqueue_size(q);
-	void** res = NULL;
-	res = calloc(n + 1, sizeof(void*));
-	if (!res){
-		UNLOCK(&q->lock);
-		return NULL;
+	if (n > 0){
+		tsqueue_node_t* qn = q->head;
+		tsqueue_node_t* aux;
+		while (qn){
+			freeItems(qn->elem);
+			aux = qn->next;
+			free(qn);
+			qn = aux;
+			q->size--;
+		}
 	}
-	res[n] = NULL;
-	UNLOCK(&q->lock);
-
-	for (int i = 0; i < n; i++) res[i] = tsqueue_get(q);
-	
-	tsqueue_close(q);
-
-	LOCK(&q->lock);	
-
+		
 	pthread_cond_broadcast(&q->putVar);
 	pthread_cond_broadcast(&q->getVar);
-
-	pthread_cond_destroy(&q->putVar);
-	pthread_cond_destroy(&q->getVar);
 	UNLOCK(&q->lock);
-
-	pthread_mutex_destroy(&q->lock);
-	/* Se res == NULL, allora NON si può distruggere la coda in sicurezza */
-	return res;
+	
+	return 0;
 }
 
 /**
- * @requires The last element of vect is NULL
- * @returns -1 if (vect == NULL), length of vect otherwise (without last element) 
-*/
-int len(void** vect){
-	if (!vect) return -1;
-	int res = 0;
-	while (vect[res]) res++;
-	return res;
+ * @brief Returns a copy of the first N bytes of the first
+ * element in the queue.
+ * NOTE: This function works even if the queue is closed.
+ * @param copyFun -- Function used to copy the element in the
+ * queue (default strncpy).
+ * @return Pointer to heap-allocated copy of the first element,
+ * NULL on error or if the queue is empty.
+ */
+void* tsqueue_getHead(tsqueue_t* q, void*(*copyFun)(void*, void*, size_t), size_t N){
+	if (!q) return NULL;
+	if tsqueue_isEmpty(q) return NULL;
+	LOCK(&q->lock);
+	if (!copyFun){
+		size_t n = strlen(q->head->elem) + 1;
+		if (N > 0) N = (N >= n ? n : N);
+		copyFun = strncpy;
+	} else if (N == 0) return NULL; /* No correct copy is possible */
+	void* p = malloc(N);
+	if (!p) return NULL;
+	copyFun(p, q->head->elem, N);
+	UNLOCK(&q->lock);
+	return p;
 }

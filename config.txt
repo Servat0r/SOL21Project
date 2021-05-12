@@ -4,30 +4,38 @@
 
 # Syntax is: <param_name> = <value>, where <param_name> is a character that can be followed
 # by a sequence of alphanumeric characters, and <value> can contain ANY character.
-# The value '?' means that this attribute is NOT specified.
 # Any unrecognized attribute is ignored by the parser.
 # There MUST be spaces between any variable name and its value (otherwise it is generated
 # an error) in order to simplify parsing of the file.
+# The server will start iff these fields are correct:
+#	- SocketPath != NULL & a correct pathname;
+#	- WorkersInPool > 0;
+#	- Total sum of "Storage*" > 0;
+#	- MaxFileNo > 0;
+#	- MaxClientAtStart > 0.
 
-
-#Path of the server socket
+# Path of the server socket
 SocketPath = bin/tmp/socket 
 
-#Number of worker threads
+# Number of worker threads
 WorkersInPool = 4
 
-#Total storage size is sum of the following fields (multiplied by 2^20, 2^10, 1)
-#GBytes of storage size
+# Total storage size is sum of the following fields (multiplied by 2^20, 2^10, 1)
+# GBytes of storage size
 StorageGBSize = 0
 
-#MBytes of storage size
+# MBytes of storage size
 StorageMBSize = 100
 
-#KBytes of storage size
+# KBytes of storage size
 StorageKBSize = 0
 
-#Path of the logging file
-LogFilePath = ? #Unspecified (ignored by the server)
+# Max File Capacity of the server
+MaxFileNo = 100
+
+# Initial value of the 'maxclient' field for server and fdatas
+# (i.e., max number of open file descriptors at start)
+MaxClientAtStart = 256
 
 
 #random words = syntax errors

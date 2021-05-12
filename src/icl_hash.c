@@ -201,7 +201,7 @@ icl_hash_update_insert(icl_hash_t *ht, void* key, void *data, void **olddata)
     curr->next = ht->buckets[hash_val]; /* add at start */
 
     ht->buckets[hash_val] = curr;
-    ht->nentries++;
+    ht->nentries++; /* this is okay because key was either not found or found-and-removed */
 
     if(olddata!=NULL && *olddata!=NULL)
         *olddata = NULL;
@@ -237,13 +237,14 @@ int icl_hash_delete(icl_hash_t *ht, void* key, void (*free_key)(void*), void (*f
             }
             if (*free_key && curr->key) (*free_key)(curr->key);
             if (*free_data && curr->data) (*free_data)(curr->data);
-            ht->nentries++;
+            ht->nentries--; /* This was WRONG, since key has been found and icl_entry_t curr removed and nothing has been touched before */
             free(curr);
             return 0;
         }
         prev = curr;
         curr = curr->next;
     }
+	/* Key not found */
     return -1;
 }
 

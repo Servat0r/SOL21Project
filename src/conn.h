@@ -1,5 +1,11 @@
-#if !defined(CONN_H)
-#define CONN_H
+/**
+ * @brief Implementation of the readn and writen functions provided
+ * by prof. Massimo Torquati and Alessio Conte, based on the one
+ * in the book "Advanced Programming In the UNIX Environment" by 
+ * W. Richard Stevens and Stephen A. Rago, 2013.
+ */
+#if !defined(_CONN_H)
+#define _CONN_H
 
 #include <sys/types.h> 
 #include <sys/socket.h>
@@ -10,11 +16,10 @@
 #include <stdlib.h>
 
 
-/** Evita letture parziali
- *
- *   \retval -1   errore (errno settato)
- *   \retval  0   se durante la lettura da fd leggo EOF
- *   \retval size se termina con successo
+/**
+ * @brief Avoids partial reads.
+ * @return size on success, -1 on error (errno set), 
+ * 0 if during reading from fd EOF is read.
  */
 static int readn(long fd, void *buf, size_t size) {
     size_t left = size;
@@ -32,11 +37,10 @@ static int readn(long fd, void *buf, size_t size) {
     return size;
 }
 
-/** Evita scritture parziali
- *
- *   \retval -1   errore (errno settato)
- *   \retval  0   se durante la scrittura la write ritorna 0
- *   \retval  1   se la scrittura termina con successo
+/**
+ * @brief Avoids partial writes.
+ * @return 1 on success, -1 on error (errno set),
+ * 0 if during writing write returns a 0
  */
 static int writen(long fd, void *buf, size_t size) {
     size_t left = size;

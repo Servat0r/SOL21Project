@@ -38,7 +38,7 @@ static inline void print_error(const char * str, ...) {
  * @brief Checks if the string is 'useless' (i.e., a series of C space characters). 
  * @return true if the string is useless, false otherwise.
  */
-bool isUseless(char* input){
+static bool isUseless(char* input){
 	bool res = true;
 	size_t n = strlen(input);
 	for (int i = 0; i < n; i++){
@@ -50,36 +50,38 @@ bool isUseless(char* input){
 	return res;
 }
 
+/* Una dimostrazione di correttezza della funzione può essere la seguente:
+ * il ciclo while principale assume come corretti tutti e soli i path della forma [/[^/]*]+
+ * (nella notazione di Python, pertanto accetta come corretti anche nomi di file che in
+ * Windows non sono accettati) e controlla che non ci siano duplicati verificando che la
+ * somma di (lunghezza(token)+1) per tutti i token sia uguale alla lunghezza iniziale della
+ * stringa, assumendo che un path che termina con '/' sia equivalente a un ultimo token di
+ * lunghezza 0 (e quindi aggiunge 1 all'inizio) e un path che non comincia con '/' è in
+ * corrispondenza col path di lunghezza n + 1 che ha '/' come primo carattere (e quindi
+ * sottrae 1).
+*/
 /**
  * @brief Parse string pathname to check if it is a correct pathname (absolute / relative).
 */
-bool isPath(char* pathname){
+static bool isPath(char* pathname){
 	if (!pathname) return false;
 	size_t clen = 0; /* Current len of parsed tokens (used for checking ONLY '/' between tokens) */
 	size_t n = strlen(pathname);
+	if (n == 0) return false; /* An empty path is not interesting */
 	if (pathname[n-1] == '/') clen++; /* Case of a directory path */
 	if (pathname[0] != '/') clen--; /* Case of a NOT absolute path */
+	char* pathcopy = malloc(n+1);
+	if (!pathcopy) return false;
+	strncpy(pathcopy, pathname, n+1);
 	char* saveptr;
 	char* token;
-	token = strtok_r(pathname, "/", &saveptr);
-	bool isFirstName = true; /* Used for checking '~' */
+	token = strtok_r(pathcopy, "/", &saveptr);
 	while (token){
-		bool ok = false;
 		size_t m = strlen(token);
 		clen += m + 1; /* Also '/' */
-		if ((m == 1) && (token[0] == '.')) ok = true; /* Current directory */
-		else if ((m == 2) && (strncmp(token, "..", 2) == 0)) ok = true; /* Parent directory */
-		else if (isFirstName && (m == 1) && (token[0] == '~') && (pathname[0] != '/')) ok = true; /* Home directory */
-		else {
-			for (int i = 0; i < m; i++){
-				if (isalnum(token[i])) ok = true;
-				else { ok = false; break; }
-			}
-		}
-		if (!ok) return false; /* Wrong path */
-		isFirstName = false;
 		token = strtok_r(NULL, "/", &saveptr);
 	}
+	free(pathcopy);
 	if (clen != n){
 		fprintf(stderr, "Error: uncorrect file/dir path format\n");
 		return false;
@@ -90,7 +92,7 @@ bool isPath(char* pathname){
 /** 
  * @brief Converts a string into uppercase.
  */
-bool strtoupper(char* out, const char* in, size_t len){
+static bool strtoupper(char* out, const char* in, size_t len){
 	if (strncpy(out, in, len) == NULL){
 		perror("strtoupper");
 		return false;
@@ -101,6 +103,13 @@ bool strtoupper(char* out, const char* in, size_t len){
 	}
 	return true;
 }
+
+
+/**
+ * @brief Dummy function for when there is nothing to free.
+ */
+static void dummy(void* arg){ return ; }
+
 
 /** 
  * @brief Exits the current thread if the pthread_mutex_lock fails.

@@ -9,18 +9,23 @@
 #include <icl_hash.h>
 #include <util.h>
 
-
+/**
+ * @brief Struct that contains all relevant fields for server configuration.
+ */
 typedef struct config_s {
 
 	char* socketPath; /* UNIX_PATH_MAX == 108 */
-	long workersInPool;
-	long storageSize; /* In KB */ 
+	long workersInPool; /* "default" = 1 */
+	long storageSize; /* In KB */
+	long maxFileNo; /* "default" = 1 */
 	char* logFilePath; /* MAXPATHSIZE == 4096 */
 
 } config_t;
 
-void dummy(void* arg){ return ; }
 
+/**
+ * @brief Checks if a value is unspecified ( '?' ).
+ */
 bool isUnspecified(char* value){
 	if (!value || (strlen(value) != 1)) return false;
 	return (value[0] == '?' ? true : false);
@@ -29,9 +34,14 @@ bool isUnspecified(char* value){
 /** @brief Initializes a config_t object by zeroing numeric fields */
 int config_init(config_t* config){
 	memset(config, 0, sizeof(*config));
+	config->socketPath = NULL;
+	config->logFilePath = NULL;
 	return 0;
 }
 
+/**
+ * @brief Resets config string pointers.
+ */
 int config_reset(config_t* config){
 	config->socketPath = NULL;
 	config->logFilePath = NULL;
@@ -49,7 +59,6 @@ int config_reset(config_t* config){
  *	data to be stored in config.
  * @return true on success, false on failure (invalid params or values in dict).
  */
-
 bool config_parsedict(config_t* config, icl_hash_t* dict){
 	if (!config || !dict) return false;
 	long numconf;
@@ -141,6 +150,23 @@ bool config_parsedict(config_t* config, icl_hash_t* dict){
 			return false;
 		}
 	}
+	
+	datum = icl_hash_find(dict, "MaxFileNo");
+
+	if (datum){
+		if (isUnspecified(datum)) { /* Unspecified */
+			config->maxFileNo = 1;
+			icl_hash_delete(dict, "MaxFileNo", free, free);
+		} else if (!getInt(datum, &numconf)){
+			config->maxFileNo = numconf;
+			icl_hash_delete(dict, "MaxFileNo", free, free);
+		} else {
+			fprintf(stderr, "Error while fetching 'MaxFileNo' attribute\n");
+			icl_hash_delete(dict, "MaxFileNo", free, free);
+			return false;
+		}
+	}
+	
 	return true;
 }
 
@@ -153,6 +179,7 @@ void config_printout(config_t* config){
 	else printf("Unspecified SocketPath\n");
 	printf("WorkersInPool = %ld\n", config->workersInPool);
 	printf("StorageSize (KB) = %ld\n", config->storageSize);
+	printf("MaxFileNo = %ld\n", config->maxFileNo);	
 	if (config->logFilePath) printf("LogFilePath = %s\n", config->logFilePath);
 	else printf("Unspecified LogFilePath\n");
 }
