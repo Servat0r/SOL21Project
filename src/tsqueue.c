@@ -192,7 +192,7 @@ int tsqueue_flush(tsqueue_t* q, void(*freeItems)(void*)){
  * element in the queue.
  * NOTE: This function works even if the queue is closed.
  * @param copyFun -- Function used to copy the element in the
- * queue (default strncpy).
+ * queue (default memcpy).
  * @return Pointer to heap-allocated copy of the first element,
  * NULL on error or if the queue is empty.
  */
@@ -203,11 +203,11 @@ void* tsqueue_getHead(tsqueue_t* q, void*(*copyFun)(void*, void*, size_t), size_
 	if (!copyFun){
 		size_t n = strlen(q->head->elem) + 1;
 		if (N > 0) N = (N >= n ? n : N);
-		copyFun = strncpy;
+		copyFun = memcpy;
 	} else if (N == 0) return NULL; /* No correct copy is possible */
 	void* p = malloc(N);
 	if (!p) return NULL;
-	copyFun(p, q->head->elem, N);
+	copyFun((char*)p, (char*)(q->head->elem), N);
 	UNLOCK(&q->lock);
 	return p;
 }

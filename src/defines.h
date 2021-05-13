@@ -22,6 +22,7 @@
 #define UNIX_PATH_MAX 108 /* Maximum length of socket name */
 #define MAXBUFSIZE 4096 /* Maximum length of read/write buffers */
 #define EOS "\0" /* End of client-stream */
+#define CHSIZE sizeof(char) /* For using with integers to cast to size_t */
 
 #define MAX(X, Y) ( (X) >= (Y) ? (X) : (Y));
 #define MIN(X, Y) ( (X) <= (Y) ? (X) : (Y));
