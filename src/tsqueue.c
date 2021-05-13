@@ -1,5 +1,5 @@
 #include <tsqueue.h>
-#include <util.h>
+
 
 /**
  * @brief Initializes a tsqueue_t object.
@@ -23,7 +23,7 @@ int tsqueue_init(tsqueue_t* q){
 	q->waitGet = 0;
 	q->activePut = false;
 	q->activeGet = false;
-	q->state = Q_CLOSE; /* Someone MUST open queue at the beginning */
+	q->state = Q_CLOSED; /* Someone MUST open queue at the beginning */
 	return 0;
 }
 
@@ -59,7 +59,7 @@ int tsqueue_open(tsqueue_t* q){
 int tsqueue_close(tsqueue_t* q){
 	if (!q) return -1;
 	LOCK(&q->lock);
-	q->state = Q_CLOSE;
+	q->state = Q_CLOSED;
 	pthread_cond_broadcast(&q->putVar);
 	pthread_cond_broadcast(&q->getVar);
 	UNLOCK(&q->lock);
@@ -69,7 +69,7 @@ int tsqueue_close(tsqueue_t* q){
 
 /**
  * @brief Puts the item 'elem' in the queue if it is open and there is NOT any active
- * producer / consumer.
+ * producer / consumer. If queue is closed, exit immediately.
  * @return 0 on success, -1 on error, 1 if queue is closed.
 */
 int tsqueue_put(tsqueue_t* q, void* elem){
@@ -78,7 +78,7 @@ int tsqueue_put(tsqueue_t* q, void* elem){
 	q->waitPut++;
 	while ((q->state == Q_OPEN) && putShouldWait(q)) pthread_cond_wait(&q->putVar, &q->lock);
 	q->waitPut--;
-	if (q->state == Q_CLOSE){ /* NO more items to insert */
+	if (q->state == Q_CLOSED){ /* NO more items to insert */
 		UNLOCK(&q->lock);
 		return 1;
 	}
@@ -112,13 +112,23 @@ int tsqueue_put(tsqueue_t* q, void* elem){
 	return 0;		
 }
 
+/**
+ * @brief Gets the next item in the queue if it is open and there is NOT
+ * any active producer / consumer and makes param res point to it.
+ * If queue is closed:
+ *	- if empty, exits immediately;
+ *	- otherwise, gets item normally.
+ * @param res -- Pointer to extracted item (on success). NOTE: For memory
+ * safety, res should NOT point to any previous data.
+ * @return 0 on success, -1 on error, 1 if queue is closed.
+*/
 int tsqueue_get(tsqueue_t* q, void* res){
 	if (!q) return -1;
 	LOCK(&q->lock);
 	q->waitGet++;
 	while ((q->state == Q_OPEN) && getShouldWait(q)) pthread_cond_wait(&q->getVar, &q->lock);
 	q->waitGet--;
-	if ((q->state == Q_CLOSE) && (tsqueue_isEmpty(q))){ /* NO more items to consume */
+	if ((q->state == Q_CLOSED) && (tsqueue_isEmpty(q))){ /* NO more items to consume */
 		UNLOCK(&q->lock);
 		return 1;
 	}
@@ -138,7 +148,18 @@ int tsqueue_get(tsqueue_t* q, void* res){
 	return 0;
 }
 
-
+/**
+ * @brief Removes all items in the queue and closes it,
+ * so that without any other operation from now all waiting
+ * producers/consumers will fail without modifying the queue.
+ * NOTE: Since tsqueue_t struct is thought to be also STACK-
+ * allocated (but not the items), this method should be called
+ * before destroying a queue but it is NOT a destroying one.
+ * @param q -- The queue to flush and close.
+ * @param freeItems -- Pointer to function to free all items
+ * in the queue (defaults to 'free').
+ * @return 0 on success, -1 on error (invalid params).
+ */
 int tsqueue_flush(tsqueue_t* q, void(*freeItems)(void*)){
 
 	if (!q) return -1;
@@ -157,6 +178,7 @@ int tsqueue_flush(tsqueue_t* q, void(*freeItems)(void*)){
 			q->size--;
 		}
 	}
+	q->state = Q_CLOSED;
 		
 	pthread_cond_broadcast(&q->putVar);
 	pthread_cond_broadcast(&q->getVar);

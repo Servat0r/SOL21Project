@@ -1,5 +1,5 @@
 CC		=  gcc
-CFLAGS	+= -Wall -g -pedantic
+CFLAGS	+= -Wall -g -pedantic -Wno-unused-function
 #Main directories
 SRC		= src
 BIN		= bin
@@ -11,7 +11,7 @@ TMP		= bin/tmp
 #Threads library (POSIX threads)
 LTHREAD	= -lpthread
 #Files to remove with 'clean'/'cleanall'
-TARGETS	= $(wildcard $(BIN)/*) $(wildcard $(LIB)/*) $(wildcard $(OBJS)/*) $(wildcard $(TMP)/*)
+TARGETS	= $(wildcard $(BIN)/*) $(wildcard $(LIB)/*) $(wildcard $(OBJS)/*) $(wildcard $(TMP)/*) $(wildcard $(BIN)/test/*)
 
 .PHONY : clean unlink debug
 .SUFFIXES : .c .h .o

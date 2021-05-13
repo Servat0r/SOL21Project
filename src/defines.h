@@ -23,7 +23,13 @@
 #define MAXBUFSIZE 4096 /* Maximum length of read/write buffers */
 #define EOS "\0" /* End of client-stream */
 
+#define MAX(X, Y) ( (X) >= (Y) ? (X) : (Y));
+#define MIN(X, Y) ( (X) <= (Y) ? (X) : (Y));
 
+/**
+ * @brief Dummy function for when there is nothing to free.
+ */
+static void dummy(void* arg){ return ; }
 
 /** @brief Checks whether a system call fails and if yes, prints the
  * corresponding error and exits.
@@ -86,5 +92,69 @@
 		perror(str);	\
 		errno = errno_copy;	\
 	}
+	
+/** 
+ * @brief Exits the current thread if the pthread_mutex_lock fails.
+ */
+#define LOCK(l)      if (pthread_mutex_lock(l)!=0)        { \
+    fprintf(stderr, "ERRORE FATALE lock\n");		    \
+    pthread_exit((void*)EXIT_FAILURE);			    \
+  }
+
+/**
+ * @brief Exits the current thread if the pthread_mutex_unlock fails.
+ */   
+#define UNLOCK(l)    if (pthread_mutex_unlock(l)!=0)      { \
+  fprintf(stderr, "ERRORE FATALE unlock\n");		    \
+  pthread_exit((void*)EXIT_FAILURE);				    \
+  }
+
+/**
+ * @brief Exits the current thread if the pthread_cond_wait fails.
+ */   
+#define WAIT(c,l)    if (pthread_cond_wait(c,l)!=0)       { \
+    fprintf(stderr, "ERRORE FATALE wait\n");		    \
+    pthread_exit((void*)EXIT_FAILURE);				    \
+}
+
+/* ATTENZIONE: t e' un tempo assoluto! */
+/**
+ * @brief Exits the current thread if the pthread_cond_timedwait fails.
+ */   
+#define TWAIT(c,l,t) {							\
+    int r=0;								\
+    if ((r=pthread_cond_timedwait(c,l,t))!=0 && r!=ETIMEDOUT) {		\
+      fprintf(stderr, "ERRORE FATALE timed wait\n");			\
+      pthread_exit((void*)EXIT_FAILURE);					\
+    }									\
+  }
+
+/**
+ * @brief Exits the current thread if the pthread_cond_signal fails.
+ */   
+#define SIGNAL(c)    if (pthread_cond_signal(c)!=0)       {	\
+    fprintf(stderr, "ERRORE FATALE signal\n");			\
+    pthread_exit((void*)EXIT_FAILURE);					\
+  }
+
+/**
+ * @brief Exits the current thread if the pthread_cond_broadcast fails.
+ */   
+#define BCAST(c)     if (pthread_cond_broadcast(c)!=0)    {		\
+    fprintf(stderr, "ERRORE FATALE broadcast\n");			\
+    pthread_exit((void*)EXIT_FAILURE);						\
+  }
+  
+/**
+ * @brief Exits the current thread if the pthread_mutex_trylock fails.
+ */   
+static inline int TRYLOCK(pthread_mutex_t* l) {
+  int r=0;		
+  if ((r=pthread_mutex_trylock(l))!=0 && r!=EBUSY) {		    
+    fprintf(stderr, "ERRORE FATALE unlock\n");		    
+    pthread_exit((void*)EXIT_FAILURE);			    
+  }								    
+  return r;	
+}
 
 #endif /* _DEFINES_H */

@@ -7,15 +7,16 @@
 #define _TSQUEUE_H
 
 #include <defines.h>
+#include <util.h>
 
 /**
  * @brief Possible states of the queue:
  *	- Q_OPEN: the queue is open for new items, i.e. both tsqueue_put and tsqueue_get
  *	could block but will NEVER fail;
- *	- Q_CLOSE: the queue is closed for new items, i.e. tsqueue_put will ALWAYS fail
+ *	- Q_CLOSED: the queue is closed for new items, i.e. tsqueue_put will ALWAYS fail
  *	but tsqueue_get will work until the queue contains any item.
 */
-typedef enum { Q_OPEN, Q_CLOSE } queue_state_t;
+typedef enum { Q_OPEN, Q_CLOSED } queue_state_t;
 
 
 typedef struct tsqueue_node {
@@ -44,7 +45,8 @@ int tsqueue_init(tsqueue_t*),
 	tsqueue_close(tsqueue_t*),
 	tsqueue_put(tsqueue_t*, void*),
 	tsqueue_get(tsqueue_t*, void*),
-	tsqueue_getHead(tsqueue_t*, void*(*copyFun)(void*,void*,size_t), size_t),
 	tsqueue_flush(tsqueue_t* q, void(*freeItems)(void*));
 
+void*
+	tsqueue_getHead(tsqueue_t*, void*(*copyFun)(void*,void*,size_t), size_t);
 #endif

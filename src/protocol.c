@@ -27,7 +27,6 @@
  */
 
 #include <protocol.h>
-#include <conn.h>
 
 /** 
  * @brief Dummy function to be used with msg_destroy when you don't need to free msg.args contents.

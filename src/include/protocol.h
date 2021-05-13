@@ -8,6 +8,7 @@
 #define _PROTOCOL_H
 
 #include <defines.h>
+#include <util.h>
 
 /**
  * @brief Types of messages that client and server can send each other.

@@ -5,7 +5,7 @@
 #define ARRAYSIZE(arr) (sizeof(arr) / sizeof(arr[0]))
 
 char* okpaths[8] = {"/home/", "home", "home/", "/home", "./home", "../../home", "~/home", "ab/cd"};
-char* errpaths[5] = {"/~/home", "ab//cd", "abc//", "//abc", "a/b#c"};
+char* errpaths[3] = {"ab//cd", "abc//", "//abc"};
 
 int main(void){
 	char path[MAXBUFSIZE];

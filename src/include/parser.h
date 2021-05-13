@@ -5,7 +5,6 @@
 
 #include <defines.h>
 #include <icl_hash.h>
-//#include <config.h>
 
 
 /**
@@ -23,12 +22,12 @@ typedef enum {NOERR, ILLARG, ILLCHAR, OVERFLOW, NOMATCH, SYNTAX} parserr_t;
 */
 void printError(parserr_t e){
 	switch(e){
-		case NOERR: printf("No error\n"); break;
-		case ILLARG: printf("Illegal argument\n"); break;
-		case ILLCHAR: printf("Illegal character\n"); break;
-		case OVERFLOW: printf("Buffer overflow\n"); break;
-		case NOMATCH: printf("No matching\n"); break;
-		case SYNTAX: printf("Syntax error\n"); break;
+		case NOERR: fprintf(stderr, "No error\n"); break;
+		case ILLARG: fprintf(stderr, "Illegal argument\n"); break;
+		case ILLCHAR: fprintf(stderr, "Illegal character\n"); break;
+		case OVERFLOW: fprintf(stderr, "Buffer overflow\n"); break;
+		case NOMATCH: fprintf(stderr, "No matching\n"); break;
+		case SYNTAX: fprintf(stderr, "Syntax error\n"); break;
 	}
 }
 
@@ -43,7 +42,7 @@ bool
 	parseComment(const char*),
 	parseAssign(const char*),
 	parseLine(char*, char*, char*, int),
-	//parseFile(const char*, config_t*);
 	parseFile(const char*, icl_hash_t*);
 
 #endif
+
