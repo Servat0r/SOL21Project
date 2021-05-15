@@ -42,8 +42,8 @@ fdata_t* fdata_create(int maxclient, int creator){ /* -> fss_create */
 	}
 	memset(fdata, 0, sizeof(fdata_t));
 	fdata->data = NULL;
-	fdata->size = 0; /* Per semplicità */
-
+	fdata->size = 0;
+	fdata->flags = GF_VALID; /* Valid */
 	
 	fdata->clients = malloc((maxclient + 1) * sizeof(char));
 	if (!fdata->clients){ errno = ENOMEM; free(fdata); return NULL; }
@@ -58,8 +58,7 @@ fdata_t* fdata_create(int maxclient, int creator){ /* -> fss_create */
 	
 	/* Gives access to creator */
 	fdata->clients[creator] = LF_OPEN;
-	fdata->flags = GF_VALID; /* Valid */
-	
+
 	return fdata;
 }
 
@@ -95,7 +94,7 @@ int fdata_open(fdata_t* fdata, int client){ /* -> fss_open */
 		}
 	}
 
-	if (!(fdata->clients[client] & LF_OPEN)) fdata->clients[client] = fdata->clients[client] | LF_OPEN; /* file opened */
+	if (!(fdata->clients[client] & LF_OPEN)) fdata->clients[client] |= LF_OPEN; /* file opened */
 	else {errno = EBADF; ret = -1; } /* file ALREADY open */
 
 	rwlock_write_finish(&fdata->lock);
@@ -126,7 +125,7 @@ int fdata_close(fdata_t* fdata, int client){ /* -> fss_close */
 
 	if (client > fdata->maxclient){ errno = EBADF; return -1; }
 	
-	if (fdata->clients[client] & LF_OPEN) fdata->clients[client] = fdata->clients[client] & !LF_OPEN; /* file closed */
+	if (fdata->clients[client] & LF_OPEN) fdata->clients[client] &= ~LF_OPEN; /* file closed */
 	else ret = -1; /* file NOT open */
 	rwlock_write_finish(&fdata->lock);
 
@@ -182,7 +181,7 @@ int fdata_read(fdata_t* fdata, void** buf, int client){ /* -> fss_read */
  */
 bool fdata_canUpload(fdata_t* fdata, int client){
 	if ((!fdata) || (client > fdata->maxclient)){ errno = EINVAL; return false; }
-	bool gf = (fdata->flags & GF_LOCKED) && (fdata->flags & GF_UPLOAD) && (fdata->flags % GF_DIRTY != 0);
+	bool gf = (fdata->flags & GF_LOCKED) && (fdata->flags & GF_UPLOAD) && !(fdata->flags & GF_DIRTY);
 	bool lf = (fdata->clients[client] & LF_OPEN) && (fdata->clients[client] & LF_OWNER);
 	return (gf && lf);
 }
@@ -226,7 +225,7 @@ int	fdata_write(fdata_t* fdata, void* buf, size_t size, int client){
 		fdata->data = malloc(size);
 		if (!fdata->data){
 			errno = ENOMEM;
-			fdata->flags = fdata->flags & !GF_VALID; /* Invalid file */
+			fdata->flags = fdata->flags & ~GF_VALID; /* Invalid file */
 			rwlock_write_finish(&fdata->lock);
 			return -1;
 		} else {
@@ -238,7 +237,7 @@ int	fdata_write(fdata_t* fdata, void* buf, size_t size, int client){
 		fdata->data = realloc(fdata->data, newsize); /* FIXME If it is NULL, this could lead to memory bugs */
 		if (!fdata->data){ /* FATAL ERROR */
 			errno = ENOMEM;
-			fdata->flags = fdata->flags & !GF_VALID; /* Invalid file */
+			fdata->flags = fdata->flags & ~GF_VALID; /* Invalid file */
 			rwlock_write_finish(&fdata->lock);
 			return -1;
 		} else {
@@ -248,7 +247,9 @@ int	fdata_write(fdata_t* fdata, void* buf, size_t size, int client){
 		}
 	}
 	
-	fdata->flags = (fdata->flags | GF_DIRTY); /* Modified (we consider ONLY appending writes for now)*/
+	/* Modified (we consider ONLY appending writes for now)*/
+	fdata->flags |= GF_DIRTY;
+	fdata->flags &= ~GF_UPLOAD;
 	rwlock_write_finish(&fdata->lock);
 
 	return ret;
@@ -285,7 +286,10 @@ int	fdata_remove(fdata_t* fdata){ /* Implicit usage of 'free' (it is ALL heap-al
 
 void fdata_printout(fdata_t* fdata){
 	printf("fdata->size = %lu\n", fdata->size);
-	printf("fdata->flags = %d", fdata->flags);
+	printf("fdata->flags = %d\n", fdata->flags);
+	printf("locked(fdata) = ");
+	printf(fdata->flags & GF_LOCKED ? "true\n" : "false\n");
+	printf("fdata->maxclient = %d\n", fdata->maxclient);
 	printf("fdata->clients = ");
 	for (int i = 0; i <= fdata->maxclient; i++){
 		if (fdata->clients[i] & LF_OPEN) printf("1");

@@ -119,10 +119,11 @@ int tsqueue_put(tsqueue_t* q, void* elem){
  *	- if empty, exits immediately;
  *	- otherwise, gets item normally.
  * @param res -- Pointer to extracted item (on success). NOTE: For memory
- * safety, res should NOT point to any previous data.
+ * safety, res should NOT point to any previous data (i.e., res == &p, where
+ * p : void* is a pointer to anything (otherwise it will be lost).
  * @return 0 on success, -1 on error, 1 if queue is closed.
 */
-int tsqueue_get(tsqueue_t* q, void* res){
+int tsqueue_get(tsqueue_t* q, void** res){
 	if (!q) return -1;
 	LOCK(&q->lock);
 	q->waitGet++;
@@ -137,7 +138,7 @@ int tsqueue_get(tsqueue_t* q, void* res){
 	q->head = qn->next;
 	qn->next = NULL;
 	q->size--;
-	res = qn->elem;
+	*res = qn->elem;
 	qn->elem = NULL;
 	free(qn);
 	q->activeGet = false;

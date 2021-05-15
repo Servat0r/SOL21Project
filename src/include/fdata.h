@@ -15,6 +15,7 @@
 #define GF_DIRTY 2 /* File has been modified (NOT written with a writeFile) */
 #define GF_UPLOAD 4 /* A writeFile will NOT fail here (i.e. file has been created and locked) */
 #define GF_LOCKED 8 /* File is locked */
+#define GF_EXPEL 128 /* File is about to be expelled from storage */
 
 
 /* Client-local flags */

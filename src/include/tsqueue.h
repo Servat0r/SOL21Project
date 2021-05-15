@@ -44,7 +44,7 @@ int tsqueue_init(tsqueue_t*),
 	tsqueue_open(tsqueue_t*),
 	tsqueue_close(tsqueue_t*),
 	tsqueue_put(tsqueue_t*, void*),
-	tsqueue_get(tsqueue_t*, void*),
+	tsqueue_get(tsqueue_t*, void**),
 	tsqueue_flush(tsqueue_t* q, void(*freeItems)(void*));
 
 void*
