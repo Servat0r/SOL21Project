@@ -23,7 +23,7 @@ int tsqueue_init(tsqueue_t* q){
 	q->waitGet = 0;
 	q->activePut = false;
 	q->activeGet = false;
-	q->state = Q_CLOSED; /* Someone MUST open queue at the beginning */
+	q->state = Q_OPEN;
 	return 0;
 }
 
@@ -74,6 +74,7 @@ int tsqueue_close(tsqueue_t* q){
 */
 int tsqueue_put(tsqueue_t* q, void* elem){
 	if (!q || !elem) return -1;
+	tsqueue_node_t* qn;
 	LOCK(&q->lock);
 	q->waitPut++;
 	while ((q->state == Q_OPEN) && putShouldWait(q)) pthread_cond_wait(&q->putVar, &q->lock);
@@ -84,18 +85,21 @@ int tsqueue_put(tsqueue_t* q, void* elem){
 	}
 	q->activePut = true;		
 	if (q->size == 0){
-		q->head = malloc(sizeof(tsqueue_node_t));
-		if (q->head == NULL){
+		qn = malloc(sizeof(tsqueue_node_t));
+		memset(qn, 0, sizeof(*qn));
+		if (!qn){
 			UNLOCK(&q->lock);
 			return -1;
 		}
+		q->head = qn;
 		q->head->elem = elem;
 		q->head->next = NULL;
 		q->tail = q->head;
 		q->size = 1;
 	} else {
-		tsqueue_node_t* qn = malloc(sizeof(tsqueue_node_t));
-		if (qn == NULL){
+		qn = malloc(sizeof(tsqueue_node_t));
+		memset(qn, 0, sizeof(*qn));
+		if (!qn){
 			UNLOCK(&q->lock);			
 			return -1;
 		}
@@ -105,7 +109,7 @@ int tsqueue_put(tsqueue_t* q, void* elem){
 		q->size++;
 	}
 	q->activePut = false;
-	/* FIXME Modify as a rwlock */
+	/* TODO Modify as a rwlock */
 	if (q->waitGet > 0) pthread_cond_broadcast(&q->getVar);
 	else pthread_cond_broadcast(&q->putVar);
 	UNLOCK(&q->lock);
@@ -197,13 +201,13 @@ int tsqueue_flush(tsqueue_t* q, void(*freeItems)(void*)){
  * @return Pointer to heap-allocated copy of the first element,
  * NULL on error or if the queue is empty.
  */
-void* tsqueue_getHead(tsqueue_t* q, void*(*copyFun)(void*, void*, size_t), size_t N){
+void* tsqueue_getHead(tsqueue_t* q, void*(*copyFun)(void* restrict, void* restrict, size_t), size_t N){
 	if (!q) return NULL;
-	if (tsqueue_isEmpty(q)) return NULL;
 	LOCK(&q->lock);
+	if (tsqueue_isEmpty(q)) return NULL;
 	if (!copyFun){
 		size_t n = strlen(q->head->elem) + 1;
-		if (N > 0) N = (N >= n ? n : N);
+		if (N > 0) N = MIN(N,n);
 		copyFun = memcpy;
 	} else if (N == 0) return NULL; /* No correct copy is possible */
 	void* p = malloc(N);
@@ -211,4 +215,33 @@ void* tsqueue_getHead(tsqueue_t* q, void*(*copyFun)(void*, void*, size_t), size_
 	copyFun((char*)p, (char*)(q->head->elem), N);
 	UNLOCK(&q->lock);
 	return p;
+}
+
+/**
+ * @brief Returns current size of the queue q.
+ * @param s -- Pointer to size_t variabile in which
+ * the result will be written.
+ * @return 0 on success, -1 on error.
+ */
+int tsqueue_getSize(tsqueue_t* q, size_t* s){
+	if (!q) return -1;
+	LOCK(&q->lock);
+	*s = q->size;
+	UNLOCK(&q->lock);
+	return 0;
+}
+
+/**
+ * @brief Destroys queue q by destroying all its mutexes and condVar
+ * and freeing queue itself if necessary.
+ * @param freeQ -- Pointer to function to use to free the queue
+ * (default none).
+ * @return 0 on success, -1 on error.
+ */
+int tsqueue_destroy(tsqueue_t* q, void(*freeQ)(void*)){
+	pthread_mutex_destroy(&q->lock);
+	pthread_cond_destroy(&q->putVar);
+	pthread_cond_destroy(&q->getVar);
+	if (freeQ){ freeQ(q); }
+	return 0;
 }

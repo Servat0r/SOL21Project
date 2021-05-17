@@ -32,19 +32,24 @@ typedef struct fdata_s {
 	rwlock_t lock; /* Per leggere/scrivere il contenuto del file */
 } fdata_t;
 
-fdata_t* fdata_create(int maxclient, int creator); /* -> fss_create */
+fdata_t*
+	fdata_create(int, int); /* -> fss_create */
 
 int
-	fdata_open(fdata_t*, int client), /* -> fss_open */
-	fdata_close(fdata_t*, int client), /* -> fss_close */
-	fdata_read(fdata_t*, void**, int client), /* -> fss_read */
-	fdata_write(fdata_t*, void* buf, size_t size, int client), /* (append) */
-	fdata_remove(fdata_t*); /* Implicit usage of 'free' (it is ALL heap-allocated for this struct) */
+	fdata_open(fdata_t*, int), /* -> fss_open */
+	fdata_close(fdata_t*, int), /* -> fss_close */
+	fdata_read(fdata_t*, void**, size_t*, int), /* -> fss_read */
+	fdata_write(fdata_t*, void*, size_t, int), /* (append) */
+	fdata_removeClients(fdata_t*, int*, size_t); /* removes all info of a set of clients */
+
+size_t
+	fdata_totalSize(fdata_t*);
 
 bool
 	fdata_canUpload(fdata_t*, int); /* true <=> a writeFile by client will NOT fail */
 	
 void
+	fdata_destroy(fdata_t*), /* Implicit usage of 'free' (it is ALL heap-allocated for this struct) */
 	fdata_printout(fdata_t*);
 	
 #endif /* _FDATA_H */

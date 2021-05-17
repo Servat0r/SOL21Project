@@ -4,6 +4,8 @@
  * @brief Resizes the current array of clients such that client can be inserted in.
  * @return 0 on success (client is suitable for current length, or fdata->clients has
  * been correctly realloc'd), -1 on error.
+ * The usage of malloc instead of realloc is to avoid to destroy completely the file
+ * if there is no space.
  * Possible errors are:
  *	- ENOMEM (system out of memory, set by malloc);
  */
@@ -78,7 +80,7 @@ int fdata_open(fdata_t* fdata, int client){ /* -> fss_open */
 	if (!fdata){ errno = EINVAL; return -1; }
 	int ret = 0;
 	
-	rwlock_write_start(&fdata->lock);
+	rwlock_read_start(&fdata->lock);
 	
 	if ((fdata->flags & GF_VALID) == 0){ /* File NOT valid */
 		errno = EPERM; 
@@ -87,20 +89,27 @@ int fdata_open(fdata_t* fdata, int client){ /* -> fss_open */
 	}
 
 	if (client > fdata->maxclient){
+		/* We need to modify shared structs */
+		rwlock_read_finish(&fdata->lock);
+		rwlock_write_start(&fdata->lock);
 		if (fdata_resize(fdata, client) == -1){
-			fprintf(stderr, "Error while resizing #clients\n");
+			perror("Error while resizing #clients\n");
 			rwlock_write_finish(&fdata->lock);
 			return -1; /* Propagates ENOMEM */
+		} else {
+			rwlock_write_finish(&fdata->lock);
+			rwlock_read_start(&fdata->lock);
 		}
 	}
 
 	if (!(fdata->clients[client] & LF_OPEN)) fdata->clients[client] |= LF_OPEN; /* file opened */
 	else {errno = EBADF; ret = -1; } /* file ALREADY open */
 
-	rwlock_write_finish(&fdata->lock);
+	rwlock_read_finish(&fdata->lock);
 	
 	return ret;
 }
+
 
 /**
  * @brief Closes the current file for client identified by #client param.
@@ -143,7 +152,7 @@ int fdata_close(fdata_t* fdata, int client){ /* -> fss_close */
  *	- ENOMEM (by malloc);
  *	- any error by rwlock_read_*.
  */
-int fdata_read(fdata_t* fdata, void** buf, int client){ /* -> fss_read */
+int fdata_read(fdata_t* fdata, void** buf, size_t* size, int client){ /* -> fss_read */
 	if (!fdata || !buf){ errno = EINVAL; return -1; }
 	int ret = 0;
 	
@@ -158,9 +167,12 @@ int fdata_read(fdata_t* fdata, void** buf, int client){ /* -> fss_read */
 	
 	if (fdata->clients[client] & LF_OPEN) { /* file open */
 		*buf = malloc(fdata->size);
-		memset(*buf, 0, fdata->size);
 		if (*buf == NULL) ret = -1;
-		else memcpy(*buf, fdata->data, fdata->size);
+		else {
+			memset(*buf, 0, fdata->size);
+			memcpy(*buf, fdata->data, fdata->size);
+			*size = fdata->size;
+		}
 	}
 	else ret = -1; /* file NOT open */
 
@@ -187,6 +199,19 @@ bool fdata_canUpload(fdata_t* fdata, int client){
 }
 
 /**
+ * @brief Returns current TOTAL memory space occupied
+ * by the #fdata object.
+ * @returns size of the #fdata object, 0 if fdata == NULL.
+ */
+size_t fdata_totalSize(fdata_t* fdata){
+	if (!fdata) return 0;
+	size_t size = sizeof(*fdata);
+	size += fdata->size; /* Data size */
+	for (int i = 0; i <= fdata->maxclient; i++) size += 1; /* Client byte-array size (avoids overflow) */
+	return size;
+}
+
+/**
  * @brief Writes at most size bytes from the location pointed by buf by client.
  * @return 0 on success, -1 on error.
  * Possible errors are:
@@ -202,6 +227,7 @@ int	fdata_write(fdata_t* fdata, void* buf, size_t size, int client){
 	int ret = 0;
 
 	rwlock_write_start(&fdata->lock);
+
 
 	if ((fdata->flags & GF_VALID) == 0){ /* File NOT valid */
 		errno = EPERM; 
@@ -220,7 +246,7 @@ int	fdata_write(fdata_t* fdata, void* buf, size_t size, int client){
 		rwlock_write_finish(&fdata->lock);
 		return -1;
 	}
-
+	
 	if (!fdata->data){
 		fdata->data = malloc(size);
 		if (!fdata->data){
@@ -234,15 +260,23 @@ int	fdata_write(fdata_t* fdata, void* buf, size_t size, int client){
 		}
 	} else {
 		size_t newsize = fdata->size + size;
-		fdata->data = realloc(fdata->data, newsize); /* FIXME If it is NULL, this could lead to memory bugs */
-		if (!fdata->data){ /* FATAL ERROR */
+		void* ptr = realloc(fdata->data, newsize);
+		if (!ptr){ /* FATAL ERROR */
 			errno = ENOMEM;
-			fdata->flags = fdata->flags & ~GF_VALID; /* Invalid file */
+			fdata->flags &= ~GF_VALID; /* For security this needs to be done ATOMICALLY */
+#if 0
+			free(fdata->data); //FIXME Is it correct??
+			free(fdata->clients);
+			fdata->data = NULL;
+			fdata->flags = 0; /* Invalid file */
+			fdata->size = 0;
+#endif
 			rwlock_write_finish(&fdata->lock);
 			return -1;
 		} else {
-			memset(((unsigned char*)fdata->data) + fdata->size, 0, size);
-			memmove(((unsigned char*)fdata->data) + fdata->size, (unsigned char*)buf, size);
+			fdata->data = ptr;
+			//memset(((unsigned char*)fdata->data) + fdata->size, 0, size);
+			memcpy(((char*)fdata->data) + fdata->size, (char*)buf, size);
 			fdata->size = newsize;
 		}
 	}
@@ -255,18 +289,51 @@ int	fdata_write(fdata_t* fdata, void* buf, size_t size, int client){
 	return ret;
 }
 
+
+/**
+ * @brief Removes all info (open, locked) of the first #len client file
+ * descriptors from #clients.
+ * @param clients -- An array of clients whose info need to be removed.
+ * @param len -- The length of #clients.
+ * @return 1 on success with the removal of a lock on this file,
+ * 0 on success without any lock on this file, -1 on error.
+ * Possible errors are:
+ *	- EINVAL: invalid arguments;
+ *	- EPERM: file is NOT valid.
+ */
+int	fdata_removeClients(fdata_t* fdata, int* clients, size_t len){
+	if (!fdata || !clients){ errno = EINVAL; return -1; }
+	if (len == 0) return 0;
+	int unlocked = 0;
+	rwlock_write_start(&fdata->lock);
+	if (!(fdata->flags & GF_VALID)){
+		rwlock_write_finish(&fdata->lock);
+		errno = EPERM;
+		return -1;
+	}
+	for (size_t i = 0; i < len; i++){
+		if (fdata->clients[clients[i]] & LF_OWNER){
+			fdata->flags &= ~GF_LOCKED;
+			unlocked = 1;
+		}
+		fdata->clients[clients[i]] = 0;
+	}
+	rwlock_write_finish(&fdata->lock);
+	return unlocked;
+}
+
+
 /**
  * @brief Removes file from file storage and cancels all its data. This function can be
  * called only by the server when it is terminating to destroy all its files, if locking
  * on files is NOT supported.
- * @return 0 on success, -1 on error.
  * Possible errors can be:
  *	- EINVAL (invalid arguments);
  *	- EBADF (locking supported, file not open);
  *	- any error returned by rwlock_write_*.
  */
-int	fdata_remove(fdata_t* fdata){ /* Implicit usage of 'free' (it is ALL heap-allocated for this struct) */
-	if (!fdata){ errno = EINVAL; return -1; }
+void fdata_destroy(fdata_t* fdata){
+	if (!fdata){ errno = EINVAL; return; }
 
 	rwlock_write_start(&fdata->lock);
 	free(fdata->clients);
@@ -280,11 +347,10 @@ int	fdata_remove(fdata_t* fdata){ /* Implicit usage of 'free' (it is ALL heap-al
 	rwlock_destroy(&fdata->lock);
 
 	free(fdata);
-
-	return 0;
 }
 
 void fdata_printout(fdata_t* fdata){
+	rwlock_read_start(&fdata->lock);
 	printf("fdata->size = %lu\n", fdata->size);
 	printf("fdata->flags = %d\n", fdata->flags);
 	printf("locked(fdata) = ");
@@ -295,5 +361,9 @@ void fdata_printout(fdata_t* fdata){
 		if (fdata->clients[i] & LF_OPEN) printf("1");
 		else printf("0");
 	}
+	printf("\nfile content: \n");
+	write(1, fdata->data, fdata->size); /* Avoid invalid reads in absence of '\0' character */
+	printf("\nTotal size of file: %lu\n", fdata_totalSize(fdata));
 	printf("\n");
+	rwlock_read_finish(&fdata->lock);
 }

@@ -40,12 +40,15 @@ typedef struct tsqueue_s {
 } tsqueue_t;
 
 
-int tsqueue_init(tsqueue_t*),
+int 
+	tsqueue_init(tsqueue_t*),
 	tsqueue_open(tsqueue_t*),
 	tsqueue_close(tsqueue_t*),
 	tsqueue_put(tsqueue_t*, void*),
 	tsqueue_get(tsqueue_t*, void**),
-	tsqueue_flush(tsqueue_t* q, void(*freeItems)(void*));
+	tsqueue_getSize(tsqueue_t*, size_t*),
+	tsqueue_flush(tsqueue_t* q, void(*freeItems)(void*)),
+	tsqueue_destroy(tsqueue_t* q, void(*freeQ)(void*));
 
 void*
 	tsqueue_getHead(tsqueue_t*, void*(*copyFun)(void*,void*,size_t), size_t);

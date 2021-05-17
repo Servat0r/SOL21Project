@@ -13,7 +13,9 @@
 #	- Total sum of "Storage*" > 0;
 #	- MaxFileNo > 0;
 #	- MaxClientAtStart > 0;
-#	- ClientCleanupBufSize > 0.
+#	- ClientCleanupBufSize > 0;
+#	- FileStorageBuckets > 0.
+
 
 # Path of the server socket
 SocketPath = bin/tmp/socket 
@@ -53,3 +55,6 @@ ClientResizeOffset = 64
 # Length of the array of clients used by collector to cleanup old (closed) connections
 # file descriptors
 ClientCleanupBufSize = 16
+
+# Number of buckets of the file storage.
+FileStorageBuckets = 100

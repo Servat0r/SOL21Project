@@ -60,7 +60,7 @@ $(objects) : $(OBJS)/%.o : $(SRC)/%.c $(INCLUDE)/%.h $(hlib)
 	$(CC) $(includes) -fPIC $(CFLAGS) -c $< -o $@ $(LTHREAD)  
 
 %.so : $(objects)
-	$(CC) -shared $^ -o $(LIB)/$@
+	$(CC) -shared $^ -o $(LIB)/$@  $(LTHREAD)
 
 clean :
 	-rm $(TARGETS)

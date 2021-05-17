@@ -14,11 +14,15 @@
  */
 typedef struct config_s {
 
-	char* socketPath; /* UNIX_PATH_MAX == 108 */
-	long workersInPool; /* "default" = 1 */
-	long storageSize; /* In KB */
-	long maxFileNo; /* "default" = 1 */
-	char* logFilePath; /* MAXPATHSIZE == 4096 */
+	char* socketPath; /* UNIX_PATH_MAX == 108, default = NULL */
+	int workersInPool; /* default = 0 */
+	long storageSize; /* In KB, default = 0 */
+	int maxFileNo; /* default = 0 */
+	int maxClientAtStart; /* default = 0 */
+	int clientResizeOffset; /* default = 0 */
+	int clientCleanupBufSize; /* default = 0 */
+	char* logFilePath; /* MAXPATHSIZE == 4096, default = NULL */
+	int fileStorageBuckets; /* default = 0 */
 
 } config_t;
 
@@ -82,7 +86,7 @@ bool config_parsedict(config_t* config, icl_hash_t* dict){
 
 	if (datum){
 		if (isUnspecified(datum)) { /* Unspecified */
-			config->workersInPool = 1;
+			config->workersInPool = 0;
 			icl_hash_delete(dict, "WorkersInPool", free, free);
 		} else if (!getInt(datum, &numconf)){
 			config->workersInPool = numconf;
@@ -155,7 +159,7 @@ bool config_parsedict(config_t* config, icl_hash_t* dict){
 
 	if (datum){
 		if (isUnspecified(datum)) { /* Unspecified */
-			config->maxFileNo = 1;
+			config->maxFileNo = 0;
 			icl_hash_delete(dict, "MaxFileNo", free, free);
 		} else if (!getInt(datum, &numconf)){
 			config->maxFileNo = numconf;
@@ -163,6 +167,70 @@ bool config_parsedict(config_t* config, icl_hash_t* dict){
 		} else {
 			fprintf(stderr, "Error while fetching 'MaxFileNo' attribute\n");
 			icl_hash_delete(dict, "MaxFileNo", free, free);
+			return false;
+		}
+	}
+
+	datum = icl_hash_find(dict, "MaxClientAtStart");
+
+	if (datum){
+		if (isUnspecified(datum)) { /* Unspecified */
+			config->maxClientAtStart = 0;
+			icl_hash_delete(dict, "MaxClientAtStart", free, free);
+		} else if (!getInt(datum, &numconf)){
+			config->maxClientAtStart = numconf;
+			icl_hash_delete(dict, "MaxClientAtStart", free, free);
+		} else {
+			fprintf(stderr, "Error while fetching 'MaxClientAtStart' attribute\n");
+			icl_hash_delete(dict, "MaxClientAtStart", free, free);
+			return false;
+		}
+	}
+
+	datum = icl_hash_find(dict, "ClientResizeOffset");
+
+	if (datum){
+		if (isUnspecified(datum)) { /* Unspecified */
+			config->clientResizeOffset = 0;
+			icl_hash_delete(dict, "ClientResizeOffset", free, free);
+		} else if (!getInt(datum, &numconf)){
+			config->clientResizeOffset = numconf;
+			icl_hash_delete(dict, "ClientResizeOffset", free, free);
+		} else {
+			fprintf(stderr, "Error while fetching 'ClientResizeOffset' attribute\n");
+			icl_hash_delete(dict, "ClientResizeOffset", free, free);
+			return false;
+		}
+	}
+
+	datum = icl_hash_find(dict, "ClientCleanupBufSize");
+
+	if (datum){
+		if (isUnspecified(datum)) { /* Unspecified */
+			config->clientCleanupBufSize = 0;
+			icl_hash_delete(dict, "ClientCleanupBufSize", free, free);
+		} else if (!getInt(datum, &numconf)){
+			config->clientCleanupBufSize = numconf;
+			icl_hash_delete(dict, "ClientCleanupBufSize", free, free);
+		} else {
+			fprintf(stderr, "Error while fetching 'ClientCleanupBufSize' attribute\n");
+			icl_hash_delete(dict, "ClientCleanupBufSize", free, free);
+			return false;
+		}
+	}
+
+	datum = icl_hash_find(dict, "FileStorageBuckets");
+
+	if (datum){
+		if (isUnspecified(datum)) { /* Unspecified */
+			config->fileStorageBuckets = 0;
+			icl_hash_delete(dict, "FileStorageBuckets", free, free);
+		} else if (!getInt(datum, &numconf)){
+			config->fileStorageBuckets = numconf;
+			icl_hash_delete(dict, "FileStorageBuckets", free, free);
+		} else {
+			fprintf(stderr, "Error while fetching 'FileStorageBuckets' attribute\n");
+			icl_hash_delete(dict, "FileStorageBuckets", free, free);
 			return false;
 		}
 	}
@@ -177,11 +245,16 @@ bool config_parsedict(config_t* config, icl_hash_t* dict){
 void config_printout(config_t* config){
 	if (config->socketPath) printf("SocketPath = %s\n", config->socketPath);
 	else printf("Unspecified SocketPath\n");
-	printf("WorkersInPool = %ld\n", config->workersInPool);
+	printf("WorkersInPool = %d\n", config->workersInPool);
 	printf("StorageSize (KB) = %ld\n", config->storageSize);
-	printf("MaxFileNo = %ld\n", config->maxFileNo);	
+	printf("MaxFileNo = %d\n", config->maxFileNo);	
 	if (config->logFilePath) printf("LogFilePath = %s\n", config->logFilePath);
 	else printf("Unspecified LogFilePath\n");
+	printf("MaxClientAtStart = %d\n", config->maxClientAtStart);
+	printf("ClientResizeOffset = %d\n", config->clientResizeOffset);
+	printf("ClientCleanupBufSize = %d\n", config->clientCleanupBufSize);
+	printf("FileStorageBuckets = %d\n", config->fileStorageBuckets);
+	printf("No more attributes\n");
 }
 
 #endif /* _CONFIG_H */
