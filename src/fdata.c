@@ -4,21 +4,17 @@
  * @brief Resizes the current array of clients such that client can be inserted in.
  * @return 0 on success (client is suitable for current length, or fdata->clients has
  * been correctly realloc'd), -1 on error.
- * The usage of malloc instead of realloc is to avoid to destroy completely the file
- * if there is no space.
  * Possible errors are:
  *	- ENOMEM (system out of memory, set by malloc);
  */
 static int fdata_resize(fdata_t* fdata, int client){
 	if (client <= fdata->maxclient) return 0;
-	unsigned char* ptr = malloc((client + 1) * sizeof(char));
+	unsigned char* ptr = realloc(fdata->clients, (client + 1) * sizeof(char));
 	if (!ptr){ errno = ENOMEM; return -1; }
 	else {
-		memset(ptr, 0, (client + 1)*sizeof(char));
-		memmove((unsigned char*)ptr, (unsigned char*)fdata->clients, (fdata->maxclient + 1)*CHSIZE);
-		free(fdata->clients);
 		fdata->clients = ptr;
-		fdata->maxclient = MAX(fdata->maxclient, client);
+		memset(fdata->clients + fdata->maxclient + 1, 0, (client - fdata->maxclient)*sizeof(char));
+		fdata->maxclient = client;
 		return 0;
 	}
 }
@@ -263,14 +259,6 @@ int	fdata_write(fdata_t* fdata, void* buf, size_t size, int client){
 		void* ptr = realloc(fdata->data, newsize);
 		if (!ptr){ /* FATAL ERROR */
 			errno = ENOMEM;
-			fdata->flags &= ~GF_VALID; /* For security this needs to be done ATOMICALLY */
-#if 0
-			free(fdata->data); //FIXME Is it correct??
-			free(fdata->clients);
-			fdata->data = NULL;
-			fdata->flags = 0; /* Invalid file */
-			fdata->size = 0;
-#endif
 			rwlock_write_finish(&fdata->lock);
 			return -1;
 		} else {

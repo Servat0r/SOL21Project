@@ -19,7 +19,7 @@ int main(int argc, char* argv[]){
 	assert(parseFile(argv[1], dict));
 	printf("BEFORE extracting data:\n");
 	assert(!icl_hash_dump(stdout, dict));
-	assert(config_parsedict(&config, dict));
+	assert(!config_parsedict(&config, dict));
 	assert(!icl_hash_destroy(dict, free, free));
 	printf("AFTER having extracted data\n");
 	config_printout(&config);

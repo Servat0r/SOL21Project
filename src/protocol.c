@@ -36,30 +36,30 @@ static void nothing(void* data){ return; }
 /* ******************************** msg_t functions **************************************** */
 
 /**
- * @return The number of arguments (packets) that needs to be sent (besides from path),
- * -1 if type is NOT recognized as a valid msg_t object.
+ * @return The number of arguments (packets) that needs to be sent,
+ * -1 if type is NOT recognized as a valid msg_t value.
  */
 ssize_t getArgn(msg_t type){
 	switch(type){
 
+		case M_OK:
 		case M_READF:
+		case M_READNF:
 		case M_WRITEF:
 		case M_CLOSEF:
 		case M_REMOVEF:
-			return 0;
-
-		case M_OK:
-		case M_OPENF:
-		case M_GETF:
-		case M_APPENDF:
 			return 1;
 
 		case M_ERR:
+		case M_OPENF:
+		case M_GETF:
+		case M_APPENDF:
 			return 2;
 		
 	}
 	return -1; /* type is not valid */
 }
+
 
 /* ***************************** packet_t functions **************************************** */
 
@@ -90,19 +90,23 @@ void* packet_destroy(packet_t* p){
  * @return A packet_t* object containing data to be sent on success, NULL on error. 
 */
 
-packet_t* packet_openf(int* flags){
-	packet_t* p = calloc(1,sizeof(packet_t));
+packet_t* packet_openf(const char* pathname, int* flags){
+	packet_t* p = calloc(2, sizeof(packet_t));
 	if (!p) return NULL;
-	p[0].len = sizeof(int);
-	p[0].content = flags;
+	p[0].len = strlen(pathname) + 1;
+	p[0].content = pathname;
+	p[1].len = sizeof(int);
+	p[1].content = flags;
 	return p;
 }
 
-packet_t* packet_getf(void* filecontent, size_t size){
-	packet_t* p = calloc(1, sizeof(packet_t));
+packet_t* packet_getf(const char* pathname, void* filecontent, size_t size){
+	packet_t* p = calloc(2, sizeof(packet_t));
 	if (!p) return NULL;
-	p[0].len = size;
-	p[0].content = filecontent;
+	p[0].len = strlen(pathname) + 1;
+	p[0].content = pathname;
+	p[1].len = size;
+	p[1].content = filecontent;
 	return p;
 }
 
@@ -124,13 +128,57 @@ packet_t* packet_error(int* extrargs, int* error){
 	return p;
 }
 
-packet_t* packet_appendf(void* buf, size_t size){
-	packet_t* p = calloc(1, sizeof(packet_t));
+packet_t* packet_appendf(const char* pathname, void* buf, size_t size){
+	packet_t* p = calloc(2, sizeof(packet_t));
 	if (!p) return NULL;
-	p[0].len = size;
-	p[0].content = buf;
+	p[0].len = strlen(pathname) + 1;
+	p[0].content = pathname;
+	p[1].len = size;
+	p[1].content = buf;
 	return p;
 }
+
+packet_t* packet_readf(const char* pathname){
+	packet_t* p = calloc(1, sizeof(packet_t));
+	if (!p) return NULL;
+	p[0].len = strlen(pathname) + 1;
+	p[0].content = pathname;
+	return p;
+}
+
+packet_t* packet_readNf(int* N){
+	packet_t* p = calloc(1, sizeof(packet_t));
+	if (!p) return NULL;
+	p[0].len = sizeof(int);
+	p[0].content = N;
+	return p;
+}
+
+packet_t* packet_writef(const char* pathname){
+	packet_t* p = calloc(1, sizeof(packet_t));
+	if (!p) return NULL;
+	p[0].len = strlen(pathname) + 1;
+	p[0].content = pathname;
+	return p;
+}
+
+packet_t* packet_closef(const char* pathname){
+	packet_t* p = calloc(1, sizeof(packet_t));
+	if (!p) return NULL;
+	p[0].len = strlen(pathname) + 1;
+	p[0].content = pathname;
+	return p;
+}
+
+packet_t* packet_removef(const char* pathname){
+	packet_t* p = calloc(1, sizeof(packet_t));
+	if (!p) return NULL;
+	p[0].len = strlen(pathname) + 1;
+	p[0].content = pathname;
+	return p;
+}
+
+
 
 /* ****************************** message_t functions ************************************** */
 
@@ -141,8 +189,7 @@ packet_t* packet_appendf(void* buf, size_t size){
 message_t* msg_init(void){
 	message_t* msg = malloc(sizeof(message_t));
 	if (!msg) return NULL;
-	msg->path.content = malloc(MAXPATHSIZE); /* len == 0 */
-	memset(msg->path.content, 0, MAXPATHSIZE);
+	memset(msg, 0, sizeof(*msg));
 	return msg;
 }
 
@@ -159,13 +206,10 @@ message_t* msg_init(void){
  * @return 0 on success, -1 on error. Possible errors are:
  *	- ENAMETOOLONG (pathname troppo lungo).
  */
-int msg_make(message_t* msg, msg_t type, char* pathname, packet_t* p){
-	if (!msg || !pathname || !p) return -1;
-	if (strlen(pathname) >= MAXPATHSIZE){ errno = ENAMETOOLONG; return -1; }
+int msg_make(message_t* msg, msg_t type, packet_t* p){
+	if (!msg || !p) return -1;
 	msg->type = type;
 	msg->argn = getArgn(type);
-	strncpy(msg->path.content, pathname, strlen(pathname) + 1);
-	msg->path.len = strlen(pathname) + 1;
 	msg->args = p;
 	return 0;
 }
@@ -176,15 +220,14 @@ int msg_make(message_t* msg, msg_t type, char* pathname, packet_t* p){
  * @param msg -- The message to be destroyed.
  * @param freeArgs -- Pointer to function for freeing msg->args (default 'free').
  * @param freeContent -- Pointer to function for freeing content of msg->args
- * (default 'nothing' to retain received data).
+ * (default 'nothing' to retain sent/received data).
  * @return 0 on success, -1 on error (msg == NULL).
 */
 int msg_destroy(message_t* msg, void (*freeArgs)(void*), void (*freeContent)(void*)){
 	if (!freeContent) freeContent = nothing; /* default, no-action */
-	if (!freeArgs) freeArgs = free; /* default, heap-allocated */
+	if (!freeArgs) freeArgs = free; /* default, packet_t objects are heap-allocated */
 	if (!msg) return -1;
-	free(msg->path.content); /* This ALWAYS */
-	for (int i = 0; i < msg->argn; i++) freeContent(msg->args[i].content); /* This depends on the content of packet */
+	for (int i = 0; i < msg->argn; i++) freeContent(msg->args[i].content);
 	freeArgs(msg->args);
 	free(msg);
 	return 0;
@@ -192,75 +235,69 @@ int msg_destroy(message_t* msg, void (*freeArgs)(void*), void (*freeContent)(voi
 
 
 /**
- * @brief Sends the message req to file descriptor fd.
+ * @brief Sends the message msg to file descriptor fd.
  * @return 1 on success, -1 on error during a writen, 0 if a writen returned 0.
 */
-int msg_send(message_t* req, int fd){
+int msg_send(message_t* msg, int fd){
 	ssize_t res;
-	SYSCALL_RETURN((res = writen(fd, &req->type, sizeof(msg_t))), -1, "When writing msgtype");
+	SYSCALL_RETURN((res = writen(fd, &msg->type, sizeof(msg_t))), -1, "When writing msgtype");
 	if (res == 0) return 0;
-	SYSCALL_RETURN((res = writen(fd, &req->path.len, sizeof(size_t))), -1, "When writing pathlen");
+	SYSCALL_RETURN((res = writen(fd, &msg->argn, sizeof(ssize_t))), -1, "When writing argn");
 	if (res == 0) return 0;
-	SYSCALL_RETURN((res = writen(fd, req->path.content, req->path.len)), -1, "When writing path");
-	if (res == 0) return 0;
-	SYSCALL_RETURN((res = writen(fd, &req->argn, sizeof(ssize_t))), -1, "When writing argn");
-	if (res == 0) return 0;
-
-	for (ssize_t i = 0; i < req->argn; i++){
-		SYSCALL_RETURN((res = writen(fd, &req->args[i].len, sizeof(size_t))), -1, "When writing arglen");
+	for (ssize_t i = 0; i < msg->argn; i++){
+		SYSCALL_RETURN((res = writen(fd, &msg->args[i].len, sizeof(size_t))), -1, "When writing arglen");
 		if (res == 0) return 0;
-		SYSCALL_RETURN((res = writen(fd, req->args[i].content, req->args[i].len)), -1, "When writing args");
+		SYSCALL_RETURN((res = writen(fd, msg->args[i].content, msg->args[i].len)), -1, "When writing args");
 		if (res == 0) return 0;
 	}
 	return 1;
 }
 
 /**
+ * @brief Utility macro for the 'msg_recv' function.
+ */
+#define CHECK_SIZEOF(res, size) \
+	if (res == 0) return 0; \
+	else if ((res) < (size)){ \
+		errno = EBADMSG; \
+		return -1; \
+	}	
+
+
+/**
  * @brief Receives the message req from file descriptor fd.
- * @param req -- An initialized message_t* object, possibly NOT used after [msg_destroy +]
+ * @param msg -- An initialized message_t* object, possibly NOT used after [msg_destroy +]
  * msg_init for not losing data.
  * @return 1 on success, -1 on error during a readn or if #bytes read is less than needed,
  * 0 if a readn returned 0 (EOF).
 */
-int msg_recv(message_t* req, int fd){		
+int msg_recv(message_t* msg, int fd){		
 	int res;
-	SYSCALL_RETURN((res = readn(fd, &req->type, sizeof(msg_t))), -1, "When reading msgtype");
+	SYSCALL_RETURN((res = readn(fd, &msg->type, sizeof(msg_t))), -1, "When reading msgtype");
 	if (res == 0) return 0;
 	else if (res < sizeof(msg_t)){
 		errno = EBADMSG;
 		return -1;
 	}
-	SYSCALL_RETURN((res = readn(fd, &req->path.len, sizeof(size_t))), -1, "When reading pathlen");
-	if (res == 0) return 0;
-	else if (res < sizeof(size_t)){
-		errno = EBADMSG;
-		return -1;
-	}
-	SYSCALL_RETURN((res = readn(fd, req->path.content, req->path.len)), -1, "When reading path");
-	if (res == 0) return 0;
-	else if (res < req->path.len){
-		errno = EBADMSG;
-		return -1;
-	}
-	SYSCALL_RETURN((res = readn(fd, &req->argn, sizeof(ssize_t))), -1, "When reading argn");
+	SYSCALL_RETURN((res = readn(fd, &msg->argn, sizeof(ssize_t))), -1, "When reading argn");
 	if (res == 0) return 0;
 	else if (res < sizeof(ssize_t)){
 		errno = EBADMSG;
 		return -1;
 	}
-	req->args = calloc(req->argn, sizeof(packet_t));
-	if (!req->args) return -1;
-	for (ssize_t i = 0; i < req->argn; i++){
-		SYSCALL_RETURN((res = readn(fd, &req->args[i].len, sizeof(size_t))), -1, "When reading arglen");
+	msg->args = calloc(msg->argn, sizeof(packet_t));
+	if (!msg->args) return -1;
+	for (ssize_t i = 0; i < msg->argn; i++){
+		SYSCALL_RETURN((res = readn(fd, &msg->args[i].len, sizeof(size_t))), -1, "When reading arglen");
 		if (res == 0) return 0;
 		else if (res < sizeof(size_t)){
 			errno = EBADMSG;
 			return -1;
 		}
-		req->args[i].content = malloc(req->args[i].len);
-		SYSCALL_RETURN((res = readn(fd, req->args[i].content, req->args[i].len)), -1, "When reading arg");
+		msg->args[i].content = malloc(msg->args[i].len);
+		SYSCALL_RETURN((res = readn(fd, msg->args[i].content, msg->args[i].len)), -1, "When reading arg");
 		if (res == 0) return 0;
-		else if (res < req->args[i].len){
+		else if (res < msg->args[i].len){
 			errno = EBADMSG;
 			return -1;
 		}
@@ -274,7 +311,6 @@ int msg_recv(message_t* req, int fd){
  */
 void printMsg(message_t* req){
 	printf("msgtype = %d\n", req->type);
-	printf("pathname = %s\n", (char*)req->path.content);
 	printf("argn = %ld\n", req->argn);
 	for (int i = 0; i < req->argn; i++) printf("arg[%d] has size %lu\n", i, req->args[i].len);
 }

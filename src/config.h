@@ -1,5 +1,7 @@
 /**
  * @brief Header file for server configuration.
+ *
+ * @author Salvatore Correnti.
 */
 #if !defined(_CONFIG_H)
 #define _CONFIG_H
@@ -8,6 +10,7 @@
 #include <numfuncs.h>
 #include <icl_hash.h>
 #include <util.h>
+#include <limits.h>
 
 /**
  * @brief Struct that contains all relevant fields for server configuration.
@@ -35,6 +38,7 @@ bool isUnspecified(char* value){
 	return (value[0] == '?' ? true : false);
 }
 
+
 /** @brief Initializes a config_t object by zeroing numeric fields */
 int config_init(config_t* config){
 	memset(config, 0, sizeof(*config));
@@ -43,14 +47,51 @@ int config_init(config_t* config){
 	return 0;
 }
 
+
 /**
  * @brief Resets config string pointers.
  */
-int config_reset(config_t* config){
+void config_reset(config_t* config){
 	config->socketPath = NULL;
 	config->logFilePath = NULL;
-	return 0;
 }
+
+
+/**
+ * @brief Macro for setting config string attributes.
+ */
+#define STR_SETATTR(name, string, datum, attr) \
+	if (strncmp(name, string, strlen(string) + 1) == 0){ \
+		if (datum && isUnspecified(datum)) attr = NULL; \
+		else if (datum && isPath(datum)) attr = datum; \
+		else fprintf(stderr, "Error while fetching '%s' attribute\n", string); \
+		continue; \
+	}
+
+
+/**
+ * @brief Macro for setting config integer attributes.
+ */	
+#define NUM_SETATTR(name, string, datum, attr) \
+	if (strncmp(name,string,strlen(string)+1) == 0){ \
+		if (datum && isUnspecified(datum)) attr = 0; \
+		else if (datum && (getInt(datum, &numconf) == 0) && (numconf <= INT_MAX)) attr = atoi(datum); \
+		else fprintf(stderr, "Error while fetching '%s' attribute\n", string); \
+		continue; \
+	}
+
+
+/**
+ * @brief Macro for setting config storageSize attribute.
+ */
+#define STORAGE_SETATTR(name, string, datum, attr, constant) \
+	if (strncmp(name, string, strlen(string)+1) == 0){ \
+		if (datum && isUnspecified(datum)) continue; \
+		else if (datum && getInt(datum, &numconf) == 0) attr += constant * numconf; \
+		else fprintf(stderr, "Error while fetching '%s' attribute\n", string); \
+		continue; \
+	}
+
 
 /**
  * @brief Parses an icl_hash_t* object which should contain values of attributes 
@@ -61,183 +102,35 @@ int config_reset(config_t* config){
  * @param config -- The config_t* object that will contain checked data.
  * @param dict -- The parsing dict (from parseFile or equivalent) that contains
  *	data to be stored in config.
- * @return true on success, false on failure (invalid params or values in dict).
+ * @return 0 on success, -1 on failure (invalid params). All invalid values in
+ * #dict are ignored and their corresponding attributes are not set.
  */
-bool config_parsedict(config_t* config, icl_hash_t* dict){
-	if (!config || !dict) return false;
+int config_parsedict(config_t* config, icl_hash_t* dict){
+	if (!config || !dict) return -1;
 	long numconf;
-
-	void* datum = icl_hash_find(dict, "SocketPath");
-	if (datum){
-		if (isUnspecified(datum)) { /* Unspecified */
-			config->socketPath = NULL;
-			icl_hash_delete(dict, "SocketPath", free, free);
-		} else if (isPath(datum)){
-			config->socketPath = datum;
-			icl_hash_delete(dict, "SocketPath", free, dummy);
-		} else {
-			fprintf(stderr, "Error while fetching 'SocketPath' attribute\n");
-			icl_hash_delete(dict, "SocketPath", free, free);
-			return false;
-		}
+	int tmpint;
+	icl_entry_t* tmpentry;
+	char* name;
+	void* datum;
+	icl_hash_foreach(dict, tmpint, tmpentry, name, datum){
+		STR_SETATTR(name, "SocketPath", datum, config->socketPath)
+		STR_SETATTR(name, "LogFilePath", datum, config->logFilePath)
+		NUM_SETATTR(name, "WorkersInPool", datum, config->workersInPool)
+		STORAGE_SETATTR(name, "StorageGBSize", datum, config->storageSize, GBVALUE)
+		STORAGE_SETATTR(name, "StorageMBSize", datum, config->storageSize, MBVALUE)
+		STORAGE_SETATTR(name, "StorageKBSize", datum, config->storageSize, 1)
+		NUM_SETATTR(name, "MaxFileNo", datum, config->maxFileNo)
+		NUM_SETATTR(name, "MaxClientAtStart", datum, config->maxClientAtStart)
+		NUM_SETATTR(name, "ClientResizeOffset", datum, config->clientResizeOffset)
+		NUM_SETATTR(name, "ClientCleanupBufSize", datum, config->clientCleanupBufSize)
+		NUM_SETATTR(name, "FileStorageBuckets", datum, config->fileStorageBuckets)
 	}
-
-	datum = icl_hash_find(dict, "WorkersInPool");
-
-	if (datum){
-		if (isUnspecified(datum)) { /* Unspecified */
-			config->workersInPool = 0;
-			icl_hash_delete(dict, "WorkersInPool", free, free);
-		} else if (!getInt(datum, &numconf)){
-			config->workersInPool = numconf;
-			icl_hash_delete(dict, "WorkersInPool", free, free);
-		} else {
-			fprintf(stderr, "Error while fetching 'WorkersInPool' attribute\n");
-			icl_hash_delete(dict, "WorkersInPool", free, free);
-			return false;
-		}
-	}
-
-	datum = icl_hash_find(dict, "StorageGBSize");
-	if (datum){
-		if (isUnspecified(datum)) { /* Unspecified */
-			icl_hash_delete(dict, "StorageGBSize", free, free);
-		} else if (!getInt(datum, &numconf)){
-			config->storageSize += GBVALUE * numconf;
-			icl_hash_delete(dict, "StorageGBSize", free, free);
-		} else {
-			fprintf(stderr, "Error while fetching 'StorageGBSize' attribute\n");
-			icl_hash_delete(dict, "StorageGBSize", free, free);
-			return false;
-		}
-	}
-
-	datum = icl_hash_find(dict, "StorageMBSize");
-	if (datum){
-		if (isUnspecified(datum)) { /* Unspecified */
-			icl_hash_delete(dict, "StorageMBSize", free, free);
-		} else if (!getInt(datum, &numconf)){
-			config->storageSize += MBVALUE * numconf;
-			icl_hash_delete(dict, "StorageMBSize", free, free);
-		} else {
-			fprintf(stderr, "Error while fetching 'StorageMBSize' attribute\n");
-			icl_hash_delete(dict, "StorageMBSize", free, free);
-			return false;
-		}
-	}
-
-	datum = icl_hash_find(dict, "StorageKBSize");
-	if (datum){
-		if (isUnspecified(datum)) { /* Unspecified */
-			icl_hash_delete(dict, "StorageKBSize", free, free);
-		} else if (!getInt(datum, &numconf)){
-			config->storageSize += numconf;
-			icl_hash_delete(dict, "StorageKBSize", free, free);
-		} else {
-			fprintf(stderr, "Error while fetching 'StorageKBSize' attribute\n");
-			icl_hash_delete(dict, "StorageKBSize", free, free);
-			return false;
-		}
-	}
-
-	datum = icl_hash_find(dict, "LogFilePath");
-	if (datum){
-		if (isUnspecified(datum)) { /* Unspecified */
-			config->logFilePath = NULL;
-			icl_hash_delete(dict, "LogFilePath", free, free);
-		} else if (isPath(datum)){
-			config->logFilePath = datum;
-			icl_hash_delete(dict, "LogFilePath", free, dummy);
-		} else {
-			fprintf(stderr, "Error while fetching 'LogFilePath' attribute\n");
-			icl_hash_delete(dict, "LogFilePath", free, free);
-			return false;
-		}
-	}
+	/* Extract string values from the hashtable before destroying it*/
+	if (config->socketPath) icl_hash_delete(dict, "SocketPath", free, dummy);
+	if (config->logFilePath) icl_hash_delete(dict, "LogFilePath", free, dummy);
 	
-	datum = icl_hash_find(dict, "MaxFileNo");
-
-	if (datum){
-		if (isUnspecified(datum)) { /* Unspecified */
-			config->maxFileNo = 0;
-			icl_hash_delete(dict, "MaxFileNo", free, free);
-		} else if (!getInt(datum, &numconf)){
-			config->maxFileNo = numconf;
-			icl_hash_delete(dict, "MaxFileNo", free, free);
-		} else {
-			fprintf(stderr, "Error while fetching 'MaxFileNo' attribute\n");
-			icl_hash_delete(dict, "MaxFileNo", free, free);
-			return false;
-		}
-	}
-
-	datum = icl_hash_find(dict, "MaxClientAtStart");
-
-	if (datum){
-		if (isUnspecified(datum)) { /* Unspecified */
-			config->maxClientAtStart = 0;
-			icl_hash_delete(dict, "MaxClientAtStart", free, free);
-		} else if (!getInt(datum, &numconf)){
-			config->maxClientAtStart = numconf;
-			icl_hash_delete(dict, "MaxClientAtStart", free, free);
-		} else {
-			fprintf(stderr, "Error while fetching 'MaxClientAtStart' attribute\n");
-			icl_hash_delete(dict, "MaxClientAtStart", free, free);
-			return false;
-		}
-	}
-
-	datum = icl_hash_find(dict, "ClientResizeOffset");
-
-	if (datum){
-		if (isUnspecified(datum)) { /* Unspecified */
-			config->clientResizeOffset = 0;
-			icl_hash_delete(dict, "ClientResizeOffset", free, free);
-		} else if (!getInt(datum, &numconf)){
-			config->clientResizeOffset = numconf;
-			icl_hash_delete(dict, "ClientResizeOffset", free, free);
-		} else {
-			fprintf(stderr, "Error while fetching 'ClientResizeOffset' attribute\n");
-			icl_hash_delete(dict, "ClientResizeOffset", free, free);
-			return false;
-		}
-	}
-
-	datum = icl_hash_find(dict, "ClientCleanupBufSize");
-
-	if (datum){
-		if (isUnspecified(datum)) { /* Unspecified */
-			config->clientCleanupBufSize = 0;
-			icl_hash_delete(dict, "ClientCleanupBufSize", free, free);
-		} else if (!getInt(datum, &numconf)){
-			config->clientCleanupBufSize = numconf;
-			icl_hash_delete(dict, "ClientCleanupBufSize", free, free);
-		} else {
-			fprintf(stderr, "Error while fetching 'ClientCleanupBufSize' attribute\n");
-			icl_hash_delete(dict, "ClientCleanupBufSize", free, free);
-			return false;
-		}
-	}
-
-	datum = icl_hash_find(dict, "FileStorageBuckets");
-
-	if (datum){
-		if (isUnspecified(datum)) { /* Unspecified */
-			config->fileStorageBuckets = 0;
-			icl_hash_delete(dict, "FileStorageBuckets", free, free);
-		} else if (!getInt(datum, &numconf)){
-			config->fileStorageBuckets = numconf;
-			icl_hash_delete(dict, "FileStorageBuckets", free, free);
-		} else {
-			fprintf(stderr, "Error while fetching 'FileStorageBuckets' attribute\n");
-			icl_hash_delete(dict, "FileStorageBuckets", free, free);
-			return false;
-		}
-	}
-	
-	return true;
+	return 0;
 }
-
 
 /**
  * @brief Utility for testing correct configuration.

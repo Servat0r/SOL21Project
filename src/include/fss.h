@@ -7,9 +7,8 @@
  *		ANY oher that could change any of these structures, i.e. other file creators/writers
  *		and threads executing the replacement function); viceversa, when a file is removed
  *		(for example by the replacement function), the queue is NOT updated at the same time,
- *		and will discard any removed file only AFTER having been called again (this allows for
- *		example the removing of a file ONLY from hashtable after a memory allocation error, an 
- *		error I'm going to fix);
+ *		and will discard any removed file only AFTER having been called again (an error I'm 
+ *		going to fix);
  *	- a mutex used to execute creating/writing operations only ONE at a time: this is necessary
  *		to avoid multiple file creations/writings such that each one does NOT exceed file/storage
  *		capacity, but together do. This mutex is used ONLY by this functions.
@@ -54,8 +53,8 @@ typedef struct fss_s {
 
 int
 	fss_init(fss_t* fss, int nbuckets, size_t storageCap, int maxFileNo),
-	fss_create(fss_t*, char*, int, int), /* O_CREATE flag */
-	fss_open(fss_t*, char* pathname, int client),
+	fss_create(fss_t*, char*, int, int), /* O_CREATE flag; aggiungere O_LOCK come boolean */
+	fss_open(fss_t*, char* pathname, int client), /* Aggiungere O_LOCK come boolean */
 	fss_close(fss_t*, char* pathname, int client),
 	fss_read(fss_t*, char* pathname, void** buf, size_t*, int client),
 	fss_append(fss_t*, char* pathname, void* buf, size_t size, int client),

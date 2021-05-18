@@ -229,7 +229,6 @@ int	fss_read(fss_t* fss, char* pathname, void** buf, size_t* size, int client){
  *	- ENOENT: file not existing.
  */
 int	fss_append(fss_t* fss, char* pathname, void* buf, size_t size, int client){
-	int ret = 0;
 	bool bwrite;
 	LOCK(&fss->gblock);
 	rwlock_read_start(&fss->maplock);
@@ -260,21 +259,14 @@ int	fss_append(fss_t* fss, char* pathname, void* buf, size_t size, int client){
 		}
 	 	if (fdata_write(file, buf, size, client) == -1){
 	 		perror("While writing on file");
-	 		if (errno == ENOMEM){ /* FATAL error, need to expel file */
-	 			rwlock_read_finish(&fss->maplock);
-	 			/* Trashes fdata_t object */
-	 			rwlock_write_start(&fss->maplock);
-	 			icl_hash_delete(fss->fmap, pathname, free, dummy); /* Does NOT destroy fdata_t object */
-	 			fss_trash(fss, file);
-	 			rwlock_write_finish(&fss->maplock);
-	 			UNLOCK(&fss->gblock);
-	 			return -1;
-	 		} else ret = -1; /* Recoverable error */
+	 		rwlock_read_finish(&fss->maplock);
+ 			UNLOCK(&fss->gblock);
+ 			return -1;
 	 	} else fss->spaceSize += size; /* La scrittura è andata a buon fine e aggiorniamo lo spazio totale occupato */
 		rwlock_read_finish(&fss->maplock); /* Se non siamo usciti dalla funzione dobbiamo rilasciare la read-lock */
 	}
 	UNLOCK(&fss->gblock);
-	return ret;	
+	return 0;
 }
 
 
