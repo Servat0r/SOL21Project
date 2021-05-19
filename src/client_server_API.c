@@ -1,67 +1,12 @@
 #include <client_server_API.h>
+//TODO Write docs.
+
 
 /* Static global data for the current server */
 static struct sockaddr_un serverAddr;
 static const socklen_t addrLen = UNIX_PATH_MAX;
 static int serverfd = -1;
 
-/**
- * @brief Utility function for making and sending a message to the server.
- * @param msg -- A message_t object pointer (possibly not containing
- * any relevant data).
- * @param type -- A msg_t value representing message type.
- * @param p -- A packet_t pointer already initialized to be assigned to msg->args.
- * @param creatmsg -- An error message for failure in msg initialization.
- * @param sendmsg -- An error message for failure in msg sending.
- * @return 0 on success, -1 on error.
- * Possible errors are:
- *	- ENOMEM: unable to allocate memory for msg;
- *	- all errors by msg_send.
- */
-int msend(message_t* msg, msg_t type, packet_t* p, char* creatmsg, char* sendmsg){
-	int r;
-	msg = msg_init();
-	if (!msg){
-		if (creatmsg) perror(creatmsg); /* Pass them as NULL to avoid these printouts */ 
-		free(p); /* p is an array of packet_t objects created with a 'calloc' */
-		return -1;
-	}
-	msg_make(msg, type, p); /* No need to check retval */
-	if (msg_send(msg, serverfd) <= 0){ /* Message not correctly sent */
-		if (sendmsg) perror(sendmsg);
-		msg_destroy(free, nothing);
-		return -1;
-	}
-	msg_destroy(free, nothing); /* No copy on the heap */
-	return 0;
-}
-
-
-/**
- * @brief Utility function for receiving messages from the server.
- * @param msg -- An (uninitialized or previously destroyed) message_t*
- * object to which received data will be written.
- * @param creatmsg -- An error message to display on error while
- * initializing #msg.
- * @param recvmg -- An error message to display on error while
- * receiving data into #msg.
- * @return 0 on success, -1 on error.
- * Possible errors are:
- *	- ENOMEM: unable to allocate memory for msg;
- *	- all errors by msg_recv.
- */
-int mrecv(message_t* msg, char* creatmsg, char* recvmsg){
-	msg = msg_init();
-	if (!msg){
-		if (creatmsg) perror(creatmsg);
-		return -1;
-	}
-	if (msg_recv(msg, serverfd) <= 0){ /* Message not correctly received */
-		msg_destroy(msg, NULL, NULL);
-		return -1;
-	}
-	return 0;
-}
 
 
 int openConnection(const char* sockname, int msec, const struct timespec abstime){
@@ -157,10 +102,10 @@ int openFile(const char* pathname, int flags){
 	if (!p){ errno = ENOMEM; return -1; }
 	
 	/* Creates message and sends to server */
-	SYSCALL_RETURN(msend(msg, M_OPENF, p, "openFile: while creating message to send", "openFile: while creating message to send"), -1, NULL);
+	SYSCALL_RETURN(msend(serverfd, msg, M_OPENF, p, "openFile: while creating message to send", "openFile: while creating message to send"), -1, NULL);
 
 	/* Receives message(s) from server */
-	mrecv(msg, "openFile: while creating data to receive message", "openFile: while receiving message from server");
+	SYSCALL_RETURN(mrecv(serverfd, msg, "openFile: while creating data to receive message", "openFile: while receiving message from server"), -1, NULL);
 
 	/* Decodes message */
 	if (msg->type == M_ERR){
@@ -190,10 +135,12 @@ int closeFile(const char* pathname){
 	packet_t* p;
 	
 	/* Creates message and sends to server */
-	msend(msg, M_CLOSEF, p, packet_closef(pathname), "closeFile: while creating message to send", "closeFile: while creating message to send")
+	SYSCALL_RETURN(msend(serverfd, msg, M_CLOSEF, p, packet_closef(pathname), "closeFile: while creating message to send", 
+		"closeFile: while creating message to send"), -1, NULL);
 
 	/* Receives message(s) from server */
-	mrecv(msg, "closeFile: while creating data to receive message", "closeFile: while receiving message from server");
+	SYSCALL_RETURN(mrecv(serverfd, msg, "closeFile: while creating data to receive message",
+		"closeFile: while receiving message from server"), -1, NULL);
 
 	/* Decodes message */
 	if (msg->type == M_ERR){
@@ -218,9 +165,11 @@ int readFile(const char* pathname, void** buf, size_t* size){
 	message_t* msg;
 	packet_t* p;
 	bool frecv = false; /* File received */
-	msend(msg, M_READF, p, packet_readf(pathname), "readFile: while creating message to send", "readFile: while sending message to server")
+	SYSCALL_RETURN(msend(serverfd, msg, M_READF, p, packet_readf(pathname), "readFile: while creating message to send",
+		"readFile: while sending message to server"), -1, NULL);
 	while (true){
-		mrecv(msg, "readFile: while creating data to receive message", "readFile: while receiving message from server")
+		SYSCALL_RETURN(mrecv(serverfd, msg, "readFile: while creating data to receive message",
+			"readFile: while receiving message from server"), -1, NULL);
 		if (msg->type == M_ERR){
 			errno = *msg->args[0].content;
 			res = -1;
@@ -250,11 +199,11 @@ int appendToFile(const char* pathname, void* buf, size_t size, const char* dirna
 	int res;
 	message_t* msg;
 	packet_t* p;
-	msend(msg, M_APPENDF, p, packet_appendf(pathname, buf, size), "appendToFile: while creating message to send", 
-		"appendToFile: while sending message to server")
+	SYSCALL_RETURN(msend(serevrfd, msg, M_APPENDF, p, packet_appendf(pathname, buf, size), "appendToFile: while creating message to send", 
+		"appendToFile: while sending message to server"), -1, NULL);
 	while (true){
-		mrecv(msg, "appendToFile: while creating data to receive message",
-			"appendToFile: while receiving message from server")
+		SYSCALL_RETURN(mrecv(serverfd, msg, "appendToFile: while creating data to receive message",
+			"appendToFile: while receiving message from server"), -1, NULL);
 		if (msg->type == M_ERR){
 			errno = *msg->args[0].content;
 			res = -1;
