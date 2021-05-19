@@ -7,20 +7,31 @@
  * Typical usage for a sender is:
  *	message_t* msg;
  *	while (...) {
- *	msg = msg_init();
- *	packet_t* p = packet_{operation}(...);
- *	msg_make(msg, M_{operation}, pathname, p);
- *	msg_send(msg, channel);
- *	msg_destroy(msg, NULL, freeContent);
+ *		msg = msg_init();
+ *		packet_t* p = packet_{operation}(...);
+ *		msg_make(msg, M_{operation}, p);
+ *		msg_send(msg, channel);
+ *		msg_destroy(msg, free, nothing); //packet_t* make NO copy of any content
  * 	}
  *
- * Typical usage for a receiver is:
+ * Typical usage for a receiver is either:
  *	message_t* msg;
  *	while (...) {
- *	msg = msg_init();
- *	msg_recv(msg, channel);
- *	#Set pointers to msg->args[*].content#
- *	msg_destroy(msg, NULL, NULL);
+ *		msg = msg_init();
+ *		msg_recv(msg, channel);
+ *		//Use content received in msg without destroying
+ *		msg_destroy(msg, free, free); //All content was a copy made on the heap
+ *	}
+ *
+ * or:
+ *
+ *	message_t* msg;
+ *	while (...) {
+ *		msg = msg_init();
+ *		msg_recv(msg, channel);
+ *		//Create pointers for all content in the msg.args[*].content
+ *		msg_destroy(msg, free, nothing); //Saved copies by the previous step
+ *		//Use content received and then free it by hand
  *	}
  *
  * @author Salvatore Correnti.
@@ -190,6 +201,7 @@ message_t* msg_init(void){
 	message_t* msg = malloc(sizeof(message_t));
 	if (!msg) return NULL;
 	memset(msg, 0, sizeof(*msg));
+	msg->args = NULL; /* For more safety */
 	return msg;
 }
 
@@ -222,10 +234,13 @@ int msg_make(message_t* msg, msg_t type, packet_t* p){
  * @param freeContent -- Pointer to function for freeing content of msg->args
  * (default 'nothing' to retain sent/received data).
  * @return 0 on success, -1 on error (msg == NULL).
+ * NOTE: This function when used with free / nothing function arguments does NOT
+ * modify errno, so it is safe to call it without saving errno before.
 */
 int msg_destroy(message_t* msg, void (*freeArgs)(void*), void (*freeContent)(void*)){
 	if (!freeContent) freeContent = nothing; /* default, no-action */
-	if (!freeArgs) freeArgs = free; /* default, packet_t objects are heap-allocated */
+	/* default, packet_t objects are heap-allocated (if argn == 0, there is no packet_t array available */
+	if (!freeArgs) freeArgs = ( msg->args ? free : nothing); /* Frees packet_t array by default only if it is not NULL */
 	if (!msg) return -1;
 	for (int i = 0; i < msg->argn; i++) freeContent(msg->args[i].content);
 	freeArgs(msg->args);
@@ -238,17 +253,18 @@ int msg_destroy(message_t* msg, void (*freeArgs)(void*), void (*freeContent)(voi
  * @brief Sends the message msg to file descriptor fd.
  * @return 1 on success, -1 on error during a writen, 0 if a writen returned 0.
 */
+//FIXME Ci possono essere problemi in caso di (errno == 'EFBIG'), ovvero un file troppo grande per il socket
 int msg_send(message_t* msg, int fd){
 	ssize_t res;
 	SYSCALL_RETURN((res = writen(fd, &msg->type, sizeof(msg_t))), -1, "When writing msgtype");
-	if (res == 0) return 0;
+	if (res == 0){ errno = EBADMSG; return 0; }
 	SYSCALL_RETURN((res = writen(fd, &msg->argn, sizeof(ssize_t))), -1, "When writing argn");
-	if (res == 0) return 0;
+	if (res == 0){ errno = EBADMSG; return 0; }
 	for (ssize_t i = 0; i < msg->argn; i++){
 		SYSCALL_RETURN((res = writen(fd, &msg->args[i].len, sizeof(size_t))), -1, "When writing arglen");
-		if (res == 0) return 0;
+		if (res == 0){ errno = EBADMSG; return 0; }
 		SYSCALL_RETURN((res = writen(fd, msg->args[i].content, msg->args[i].len)), -1, "When writing args");
-		if (res == 0) return 0;
+		if (res == 0){ errno = EBADMSG; return 0; }
 	}
 	return 1;
 }
@@ -256,51 +272,55 @@ int msg_send(message_t* msg, int fd){
 /**
  * @brief Utility macro for the 'msg_recv' function.
  */
-#define CHECK_SIZEOF(res, size) \
-	if (res == 0) return 0; \
-	else if ((res) < (size)){ \
-		errno = EBADMSG; \
-		return -1; \
-	}	
+#define CLEANUP_RETURN(msg, res, i, string) \
+	do { \
+		errno_copy = errno; \
+		for (ssize_t j = 0; j < i; j++) free(msg->args[j].content); \
+		free(msg->args); \
+		msg->argn = 0; \
+		if (res == -1){ \
+			errno = errno_copy; \
+			perror(#string); \
+			return -1; \
+		} \
+	} while(0);
 
 
 /**
  * @brief Receives the message req from file descriptor fd.
  * @param msg -- An initialized message_t* object, possibly NOT used after [msg_destroy +]
  * msg_init for not losing data.
- * @return 1 on success, -1 on error during a readn or if #bytes read is less than needed,
- * 0 if a readn returned 0 (EOF).
+ * @return 1 on success, -1 on error during a readn, 0 if a readn returned 0 (EOF) before
+ * having read ALL message bytes.
+ * NOTE: If msg_recv returns -1, msg content is NOT valid and it should be destroyed with
+ * msg_destroy(msg, nothing, nothing) (or (msg, NULL, NULL)).
 */
 int msg_recv(message_t* msg, int fd){		
 	int res;
+	int errno_copy = 0;
+	
+	/* res == -1 => an error (different from connreset) has occurred; the same applies on the following reads */
 	SYSCALL_RETURN((res = readn(fd, &msg->type, sizeof(msg_t))), -1, "When reading msgtype");
-	if (res == 0) return 0;
-	else if (res < sizeof(msg_t)){
-		errno = EBADMSG;
-		return -1;
-	}
+	/* EOF was read => connection has been closed; the same applies on the following reads */
+	if (res == 0){ errno = ECONNRESET; return 0; }
+	
 	SYSCALL_RETURN((res = readn(fd, &msg->argn, sizeof(ssize_t))), -1, "When reading argn");
-	if (res == 0) return 0;
-	else if (res < sizeof(ssize_t)){
-		errno = EBADMSG;
-		return -1;
-	}
+	if (res == 0){ errno = ECONNRESET; return 0; }
+	
 	msg->args = calloc(msg->argn, sizeof(packet_t));
 	if (!msg->args) return -1;
 	for (ssize_t i = 0; i < msg->argn; i++){
-		SYSCALL_RETURN((res = readn(fd, &msg->args[i].len, sizeof(size_t))), -1, "When reading arglen");
-		if (res == 0) return 0;
-		else if (res < sizeof(size_t)){
-			errno = EBADMSG;
-			return -1;
-		}
+	
+		res = readn(fd, &msg->args[i].len, sizeof(size_t));
+		if (res <= 0) CLEANUP_RETURN(msg, res, i, "When reading arglen");
+		if (res == 0){ errno = ECONNRESET; return 0; }
+		
 		msg->args[i].content = malloc(msg->args[i].len);
-		SYSCALL_RETURN((res = readn(fd, msg->args[i].content, msg->args[i].len)), -1, "When reading arg");
-		if (res == 0) return 0;
-		else if (res < msg->args[i].len){
-			errno = EBADMSG;
-			return -1;
-		}
+		if (!msg->args[i].content) CLEANUP_RETURN(msg, -1, i, "When allocating memory for next arg");
+		res = readn(fd, msg->args[i].content, msg->args[i].len);
+		if (res <= 0) CLEANUP_RETURN(msg, res, i+1, "When reading arg");
+		if (res == 0){ errno = ECONNRESET; return 0; }
+
 	}
 	return 1;
 }

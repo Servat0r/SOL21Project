@@ -61,36 +61,42 @@ void config_reset(config_t* config){
  * @brief Macro for setting config string attributes.
  */
 #define STR_SETATTR(name, string, datum, attr) \
-	if (strncmp(name, string, strlen(string) + 1) == 0){ \
-		if (datum && isUnspecified(datum)) attr = NULL; \
-		else if (datum && isPath(datum)) attr = datum; \
-		else fprintf(stderr, "Error while fetching '%s' attribute\n", string); \
-		continue; \
-	}
+	do { \
+		if (strncmp(name, string, strlen(string) + 1) == 0){ \
+			if (datum && isUnspecified(datum)) attr = NULL; \
+			else if (datum && isPath(datum)) attr = datum; \
+			else fprintf(stderr, "Error while fetching '%s' attribute\n", string); \
+			continue; \
+		} \
+	} while (0); 
 
 
 /**
  * @brief Macro for setting config integer attributes.
  */	
 #define NUM_SETATTR(name, string, datum, attr) \
-	if (strncmp(name,string,strlen(string)+1) == 0){ \
-		if (datum && isUnspecified(datum)) attr = 0; \
-		else if (datum && (getInt(datum, &numconf) == 0) && (numconf <= INT_MAX)) attr = atoi(datum); \
-		else fprintf(stderr, "Error while fetching '%s' attribute\n", string); \
-		continue; \
-	}
+	do { \
+		if (strncmp(name,string,strlen(string)+1) == 0){ \
+			if (datum && isUnspecified(datum)) attr = 0; \
+			else if (datum && (getInt(datum, &numconf) == 0) && (numconf <= INT_MAX)) attr = atoi(datum); \
+			else fprintf(stderr, "Error while fetching '%s' attribute\n", string); \
+			continue; \
+		} \
+	} while (0);
 
 
 /**
  * @brief Macro for setting config storageSize attribute.
  */
 #define STORAGE_SETATTR(name, string, datum, attr, constant) \
-	if (strncmp(name, string, strlen(string)+1) == 0){ \
-		if (datum && isUnspecified(datum)) continue; \
-		else if (datum && getInt(datum, &numconf) == 0) attr += constant * numconf; \
-		else fprintf(stderr, "Error while fetching '%s' attribute\n", string); \
-		continue; \
-	}
+	do { \
+		if (strncmp(name, string, strlen(string)+1) == 0){ \
+			if (datum && isUnspecified(datum)) continue; \
+			else if (datum && getInt(datum, &numconf) == 0) attr += constant * numconf; \
+			else fprintf(stderr, "Error while fetching '%s' attribute\n", string); \
+			continue; \
+		} \
+	} while (0);
 
 
 /**

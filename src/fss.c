@@ -299,11 +299,11 @@ int	fss_clientCleanup(fss_t* fss, int* clients, size_t len){
 	fdata_t* file;
 	int tmpint;
 	icl_entry_t* tmpent;
-	rwlock_read_start(&fss->maplock);
+	rwlock_write_start(&fss->maplock); /* Here there will NOT be any other using any file */
 	icl_hash_foreach(fss->fmap, tmpint, tmpent, filename, file){
 		fdata_removeClients(file, clients, len);
 	}
-	rwlock_read_finish(&fss->maplock);
+	rwlock_write_finish(&fss->maplock);
 	return 0;
 }
 

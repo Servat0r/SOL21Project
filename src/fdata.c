@@ -293,9 +293,8 @@ int	fdata_removeClients(fdata_t* fdata, int* clients, size_t len){
 	if (!fdata || !clients){ errno = EINVAL; return -1; }
 	if (len == 0) return 0;
 	int unlocked = 0;
-	rwlock_write_start(&fdata->lock);
+	/* With a WRITE lock on the fss_clientCleanup, any locking is useless here */
 	if (!(fdata->flags & GF_VALID)){
-		rwlock_write_finish(&fdata->lock);
 		errno = EPERM;
 		return -1;
 	}
@@ -306,7 +305,6 @@ int	fdata_removeClients(fdata_t* fdata, int* clients, size_t len){
 		}
 		fdata->clients[clients[i]] = 0;
 	}
-	rwlock_write_finish(&fdata->lock);
 	return unlocked;
 }
 

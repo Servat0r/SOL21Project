@@ -18,7 +18,7 @@ bool isUseless(char* input){
 
 
 /**
- * @brief Parse string pathname to check if it is a correct pathname (absolute / relative).
+ * @brief Parses string pathname to check if it is a correct pathname (absolute / relative).
  * In the while loop, assumes to check that each path is of the form [/[^/]*]+, so it
  * adjust the current len counter to consider case of [^/]+[/[^/]*]* as it has the initial
  * '/' and case of [/[^/]*]*[/] as having an empty string after the last '/'.
@@ -90,13 +90,13 @@ int readn(long fd, void *buf, size_t size) {
     int r;
     char *bufptr = (char*)buf;
     while(left>0) {
-	if ((r=read((int)fd ,bufptr,left)) == -1) {
-	    if (errno == EINTR) continue;
-	    return -1;
-	}
-	if (r == 0) return 0;   // EOF
-        left    -= r;
-	bufptr  += r;
+		if ((r=read((int)fd ,bufptr,left)) == -1) {
+			if (errno == EINTR) continue;
+			return -1;
+		}
+		if (r == 0) return 0;   // EOF
+		left -= r;
+		bufptr += r;
     }
     return size;
 }
@@ -104,20 +104,20 @@ int readn(long fd, void *buf, size_t size) {
 /**
  * @brief Avoids partial writes.
  * @return 1 on success, -1 on error (errno set),
- * 0 if during writing write returns a 0
+ * 0 if a write returns a 0
  */
 int writen(long fd, void *buf, size_t size) {
     size_t left = size;
     int r;
     char *bufptr = (char*)buf;
     while(left>0) {
-	if ((r=write((int)fd ,bufptr,left)) == -1) {
-	    if (errno == EINTR) continue;
-	    return -1;
-	}
-	if (r == 0) return 0;  
-        left    -= r;
-	bufptr  += r;
+		if ((r=write((int)fd ,bufptr,left)) == -1) {
+			if (errno == EINTR) continue;
+			return -1;
+		}
+		if (r == 0) return 0;  
+		left -= r;
+		bufptr += r;
     }
     return 1;
 }
