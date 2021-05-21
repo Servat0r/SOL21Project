@@ -89,8 +89,8 @@ int
 	msg_destroy(message_t*, void(*freeArgs)(void*), void(*freeContent)(void*)),
 	msg_send(message_t*, int),
 	msg_recv(message_t*, int),
-	msend(int fd, message_t* msg, msg_t type, packet_t* p, char* creatmsg, char* sendmsg),
-	mrecv(int fd, message_t* msg, char* creatmsg, char* recvmsg);
+	msend(int fd, message_t** msg, msg_t type, packet_t* p, char* creatmsg, char* sendmsg),
+	mrecv(int fd, message_t** msg, char* creatmsg, char* recvmsg);
 
 void
 	printMsg(message_t*);

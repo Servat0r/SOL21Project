@@ -283,8 +283,7 @@ int	fss_write(fss_t* fss, char* pathname, int client){
 }
 
 /**
- * @brief Cleanups old data from a list of closed
- * (and NOT reopened!) connection.
+ * @brief Cleanups old data from a list of closed connections.
  * @param clients -- An array of file descriptors
  * containing the connections to be cleaned up.
  * @param len -- The length of clients.
@@ -299,9 +298,19 @@ int	fss_clientCleanup(fss_t* fss, int* clients, size_t len){
 	fdata_t* file;
 	int tmpint;
 	icl_entry_t* tmpent;
+	bool unlocked; /* To signal any other thread waiting for the lock on this file */
 	rwlock_write_start(&fss->maplock); /* Here there will NOT be any other using any file */
 	icl_hash_foreach(fss->fmap, tmpint, tmpent, filename, file){
-		fdata_removeClients(file, clients, len);
+		unlocked = false;
+		if (!(file->flags & GF_VALID)) continue;
+		for (size_t i = 0; i < len; i++){
+			if (file->clients[clients[i]] & LF_OWNER){
+				file->flags &= ~GF_LOCKED;
+				unlocked = true;
+			}
+			file->clients[clients[i]] = 0;
+		}
+		//TODO Mettere qui il codice della 'signal' per i thread in attesa della lock sul file
 	}
 	rwlock_write_finish(&fss->maplock);
 	return 0;

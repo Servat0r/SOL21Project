@@ -82,7 +82,7 @@ bool strtoupper(char* out, const char* in, size_t len){
 
 /**
  * @brief Avoids partial reads.
- * @return size on success, -1 on error (errno set), 
+ * @return 1 on success, -1 on error (errno set), 
  * 0 if during reading from fd EOF is read.
  */
 int readn(long fd, void *buf, size_t size) {
@@ -98,7 +98,7 @@ int readn(long fd, void *buf, size_t size) {
 		left -= r;
 		bufptr += r;
     }
-    return size;
+    return 1;
 }
 
 /**

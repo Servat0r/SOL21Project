@@ -1,14 +1,29 @@
 #include <client_server_API.h>
-//TODO Write docs.
+#include <poll.h>
+#include <sys/timerfd.h>
+//#include <dirscan.h>
 
 
-/* Static global data for the current server */
+
+/** 
+ * @brief Static global data for the current connection:
+ *	- serverAddr is the server address;
+ *	- addrLen is max server address length (UNIX_PATH_MAX is defined in defines.h);
+ *	- serverfd is the file descriptor of the current open socket for connection
+ *	to the server, or is -1 iff there is no active connection.
+ */
 static struct sockaddr_un serverAddr;
 static const socklen_t addrLen = UNIX_PATH_MAX;
 static int serverfd = -1;
 
 
 
+
+/**
+ * @brief
+ * @return 0 on success, -1 on error (errno set).
+ * Possible errors are:
+ */
 int openConnection(const char* sockname, int msec, const struct timespec abstime){
 	if (!sockname || msec < 0){ errno = EINVAL; return -1; }
 	if (serverfd >= 0){
@@ -65,19 +80,25 @@ int openConnection(const char* sockname, int msec, const struct timespec abstime
 			}
 		} else perror("openConnection");
 		close(tfd);
-		close(s);
+		close(serverfd);
+		serverfd = -1;
 		return -1;
 	}
 }
 
 
+/**
+ * @brief
+ * @return 0 on success, -1 on error (errno set).
+ * Possible errors are:
+ */
 int closeConnection(const char* sockname){
 	if (serverfd < 0){ /* Not connected */
 		errno = ENOTCONN; 
 		perror("closeConnection");
 		return -1;
 	}
-	if (!sockname || (strncmp(sockname, serverAddr, addrLen) != 0)){
+	if (!sockname || (strncmp(sockname, serverAddr.sun_path, addrLen) != 0)){
 		errno = EINVAL;
 		perror("closeConnection");
 		return -1;
@@ -90,6 +111,11 @@ int closeConnection(const char* sockname){
 
 
 //TODO For now the '-D' option is NOT supported and there are NO files sent back by server
+/**
+ * @brief
+ * @return 0 on success, -1 on error (errno set).
+ * Possible errors are:
+ */
 int openFile(const char* pathname, int flags){
 	if (!pathname || (flags && !(flags & O_CREATE) && !(flags & O_LOCK))){ /* NULL pathname or invalid flags */
 		errno = EINVAL;
@@ -102,14 +128,14 @@ int openFile(const char* pathname, int flags){
 	if (!p){ errno = ENOMEM; return -1; }
 	
 	/* Creates message and sends to server */
-	SYSCALL_RETURN(msend(serverfd, msg, M_OPENF, p, "openFile: while creating message to send", "openFile: while creating message to send"), -1, NULL);
+	SYSCALL_RETURN(msend(serverfd, &msg, M_OPENF, p, "openFile: while creating message to send", "openFile: while creating message to send"), -1, NULL);
 
 	/* Receives message(s) from server */
-	SYSCALL_RETURN(mrecv(serverfd, msg, "openFile: while creating data to receive message", "openFile: while receiving message from server"), -1, NULL);
+	SYSCALL_RETURN(mrecv(serverfd, &msg, "openFile: while creating data to receive message", "openFile: while receiving message from server"), -1, NULL);
 
 	/* Decodes message */
 	if (msg->type == M_ERR){
-		errno = *msg->args[0].content; /* Error on server */
+		errno = *((int*)msg->args[0].content); /* Error on server */
 		res = -1;
 	} else if (msg->type = M_OK){
 		errno = 0;
@@ -124,6 +150,11 @@ int openFile(const char* pathname, int flags){
 }
 
 
+/**
+ * @brief
+ * @return 0 on success, -1 on error (errno set).
+ * Possible errors are:
+ */
 int closeFile(const char* pathname){
 	if (!pathname){
 		errno = EINVAL;
@@ -132,19 +163,20 @@ int closeFile(const char* pathname){
 	}
 	int res;
 	message_t* msg;
-	packet_t* p;
+	packet_t* p = packet_closef(pathname);
+	if (!p){ errno = ENOMEM; return -1; }
 	
 	/* Creates message and sends to server */
-	SYSCALL_RETURN(msend(serverfd, msg, M_CLOSEF, p, packet_closef(pathname), "closeFile: while creating message to send", 
+	SYSCALL_RETURN(msend(serverfd, &msg, M_CLOSEF, p, "closeFile: while creating message to send", 
 		"closeFile: while creating message to send"), -1, NULL);
 
 	/* Receives message(s) from server */
-	SYSCALL_RETURN(mrecv(serverfd, msg, "closeFile: while creating data to receive message",
+	SYSCALL_RETURN(mrecv(serverfd, &msg, "closeFile: while creating data to receive message",
 		"closeFile: while receiving message from server"), -1, NULL);
 
 	/* Decodes message */
 	if (msg->type == M_ERR){
-		errno = *msg->args[0].content; /* Error on server */
+		errno = *((int*)msg->args[0].content); /* Error on server */
 		res = -1;
 	} else if (msg->type = M_OK){
 		errno = 0;
@@ -159,19 +191,25 @@ int closeFile(const char* pathname){
 }
 
 
+/**
+ * @brief
+ * @return 0 on success, -1 on error (errno set).
+ * Possible errors are:
+ */
 int readFile(const char* pathname, void** buf, size_t* size){
 	if (!pathname || !buf || !size){ errno = EINVAL; return -1; }
 	int res;
 	message_t* msg;
-	packet_t* p;
+	packet_t* p = packet_readf(pathname);
+	if (!p){ errno = ENOMEM; return -1; }
 	bool frecv = false; /* File received */
-	SYSCALL_RETURN(msend(serverfd, msg, M_READF, p, packet_readf(pathname), "readFile: while creating message to send",
+	SYSCALL_RETURN(msend(serverfd, &msg, M_READF, p, "readFile: while creating message to send",
 		"readFile: while sending message to server"), -1, NULL);
 	while (true){
-		SYSCALL_RETURN(mrecv(serverfd, msg, "readFile: while creating data to receive message",
+		SYSCALL_RETURN(mrecv(serverfd, &msg, "readFile: while creating data to receive message",
 			"readFile: while receiving message from server"), -1, NULL);
 		if (msg->type == M_ERR){
-			errno = *msg->args[0].content;
+			errno = *((int*)msg->args[0].content);
 			res = -1;
 			break;
 		} else if (msg->type == M_OK){
@@ -182,7 +220,7 @@ int readFile(const char* pathname, void** buf, size_t* size){
 			*size = msg->args[1].len;
 			frecv = true;
 			res = 0;
-			msg_destroy(msg, free, nothing);
+			msg_destroy(msg, free, dummy);
 		} else {
 			errno = EBADMSG;
 			res = -1;
@@ -194,26 +232,37 @@ int readFile(const char* pathname, void** buf, size_t* size){
 }
 
 //TODO For now ('-D' not supported), received messages of type 'M_GETF' are discarded
+/**
+ * @brief
+ * @return 0 on success, -1 on error (errno set).
+ * Possible errors are:
+ */
 int appendToFile(const char* pathname, void* buf, size_t size, const char* dirname){
 	if (!pathname || !buf || !dirname){ errno = EINVAL; return -1; }
 	int res;
 	message_t* msg;
-	packet_t* p;
-	SYSCALL_RETURN(msend(serevrfd, msg, M_APPENDF, p, packet_appendf(pathname, buf, size), "appendToFile: while creating message to send", 
+	packet_t* p = packet_appendf(pathname, buf, size);
+	if (!p){ errno = ENOMEM; return -1; }
+	SYSCALL_RETURN(msend(serverfd, &msg, M_APPENDF, p, "appendToFile: while creating message to send", 
 		"appendToFile: while sending message to server"), -1, NULL);
 	while (true){
-		SYSCALL_RETURN(mrecv(serverfd, msg, "appendToFile: while creating data to receive message",
+		SYSCALL_RETURN(mrecv(serverfd, &msg, "appendToFile: while creating data to receive message",
 			"appendToFile: while receiving message from server"), -1, NULL);
 		if (msg->type == M_ERR){
-			errno = *msg->args[0].content;
+			errno = *((int*)msg->args[0].content);
 			res = -1;
 			break;
 		} else if (msg->type == M_OK){
 			res = 0;
 			break;
 		} else if (msg->type == M_GETF) msg_destroy(msg, free, free);
-		else { errno = EBADMSG; res = -1; } /* Wrong message received */
+		else { /* Wrong message received */
+			errno = EBADMSG;
+			msg_destroy(msg, free, free);
+			res = -1;
+		}
 	}
+	msg_destroy(msg, free, free); /* M_OK / M_ERR */
 	return res;
 }
 

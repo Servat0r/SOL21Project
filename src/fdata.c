@@ -279,37 +279,6 @@ int	fdata_write(fdata_t* fdata, void* buf, size_t size, int client){
 
 
 /**
- * @brief Removes all info (open, locked) of the first #len client file
- * descriptors from #clients.
- * @param clients -- An array of clients whose info need to be removed.
- * @param len -- The length of #clients.
- * @return 1 on success with the removal of a lock on this file,
- * 0 on success without any lock on this file, -1 on error.
- * Possible errors are:
- *	- EINVAL: invalid arguments;
- *	- EPERM: file is NOT valid.
- */
-int	fdata_removeClients(fdata_t* fdata, int* clients, size_t len){
-	if (!fdata || !clients){ errno = EINVAL; return -1; }
-	if (len == 0) return 0;
-	int unlocked = 0;
-	/* With a WRITE lock on the fss_clientCleanup, any locking is useless here */
-	if (!(fdata->flags & GF_VALID)){
-		errno = EPERM;
-		return -1;
-	}
-	for (size_t i = 0; i < len; i++){
-		if (fdata->clients[clients[i]] & LF_OWNER){
-			fdata->flags &= ~GF_LOCKED;
-			unlocked = 1;
-		}
-		fdata->clients[clients[i]] = 0;
-	}
-	return unlocked;
-}
-
-
-/**
  * @brief Removes file from file storage and cancels all its data. This function can be
  * called only by the server when it is terminating to destroy all its files, if locking
  * on files is NOT supported.

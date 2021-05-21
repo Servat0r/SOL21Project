@@ -18,7 +18,8 @@
 
 #define GBVALUE 1048576 /* #KBs in 1 GB */
 #define MBVALUE 1024 /* #MBs in 1 MB */
-#define MAXPATHSIZE 4096 /* Maximum length of pathname (not socket) */
+#define MAXPATHSIZE pathconf("/", _PC_PATH_MAX) /* Maximum length of pathname (not socket) */
+#define ATOMPIPEBUF(pfd) pathconf(pfd, _PC_PIPE_BUF) /* Maximum size of an atomic read/write on a pipe (pfd is one fd of a pipe) */
 #define UNIX_PATH_MAX 108 /* Maximum length of socket name */
 #define MAXBUFSIZE 4096 /* Maximum length of read/write buffers */
 #define EOS "\0" /* End of client-stream */

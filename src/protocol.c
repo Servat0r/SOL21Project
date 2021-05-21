@@ -340,8 +340,8 @@ void printMsg(message_t* req){
 
 /**
  * @brief Utility function for making and sending a message to the server.
- * @param msg -- A message_t object pointer (possibly not containing
- * any relevant data).
+ * @param msg -- Address of a message_t* object (possibly not containing
+ * any relevant data) in which data to be sent shall be written.
  * @param type -- A msg_t value representing message type.
  * @param p -- A packet_t pointer already initialized to be assigned to msg->args.
  * @param creatmsg -- An error message for failure in msg initialization.
@@ -351,29 +351,29 @@ void printMsg(message_t* req){
  *	- ENOMEM: unable to allocate memory for msg;
  *	- all errors by msg_send.
  */
-int msend(int fd, message_t* msg, msg_t type, packet_t* p, char* creatmsg, char* sendmsg){
+int msend(int fd, message_t** msg, msg_t type, packet_t* p, char* creatmsg, char* sendmsg){
 	int r;
-	msg = msg_init();
-	if (!msg){
+	*msg = msg_init();
+	if (*msg == NULL){
 		if (creatmsg) perror(creatmsg); /* Pass them as NULL to avoid these printouts */ 
 		free(p); /* p is an array of packet_t objects created with a 'calloc' */
 		return -1;
 	}
-	msg_make(msg, type, p); /* No need to check retval */
-	if (msg_send(msg, fd) <= 0){ /* Message not correctly sent */
+	msg_make(*msg, type, p); /* No need to check retval */
+	if (msg_send(*msg, fd) <= 0){ /* Message not correctly sent */
 		if (sendmsg) perror(sendmsg);
-		msg_destroy(free, nothing);
+		msg_destroy(*msg, free, nothing);
 		return -1;
 	}
-	msg_destroy(free, nothing); /* No copy on the heap */
+	msg_destroy(*msg, free, nothing); /* No copy on the heap */
 	return 0;
 }
 
 
 /**
  * @brief Utility function for receiving messages from the server.
- * @param msg -- An (uninitialized or previously destroyed) message_t*
- * object to which received data will be written.
+ * @param msg -- Address of an (uninitialized or previously destroyed)
+ * message_t* object to which received data will be written.
  * @param creatmsg -- An error message to display on error while
  * initializing #msg.
  * @param recvmg -- An error message to display on error while
@@ -383,14 +383,14 @@ int msend(int fd, message_t* msg, msg_t type, packet_t* p, char* creatmsg, char*
  *	- ENOMEM: unable to allocate memory for msg;
  *	- all errors by msg_recv.
  */
-int mrecv(int fd, message_t* msg, char* creatmsg, char* recvmsg){
-	msg = msg_init();
-	if (!msg){
+int mrecv(int fd, message_t** msg, char* creatmsg, char* recvmsg){
+	*msg = msg_init();
+	if (*msg == NULL){
 		if (creatmsg) perror(creatmsg);
 		return -1;
 	}
-	if (msg_recv(msg, fd) <= 0){ /* Message not correctly received */
-		msg_destroy(msg, NULL, NULL);
+	if (msg_recv(*msg, fd) <= 0){ /* Message not correctly received */
+		msg_destroy(*msg, NULL, NULL);
 		return -1;
 	}
 	return 0;
