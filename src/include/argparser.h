@@ -19,11 +19,12 @@
  * @brief Template for defining a cmdline option type.
  */
 typedef struct optdef_s {
-	char* name;
-	int minargs;
-	int maxargs;
-	bool (*checkFun)(llist_t* args);
-	bool isUnique;
+	char* name; /* String identifier of the option (included starting '-') */
+	int minargs; /* Minimum number of arguments needed by option (cannot be < 0) */
+	int maxargs; /* Maximum number of arguments needed by option (for an unlimited number, put a negative value) */
+	bool (*checkFun)(llist_t* args); /* Function that checks correctness of all arguments provided to option (defaults to true if no argument is provided and
+	minargs == 0) */
+	bool isUnique; /* Flag for options that cannot be repeated */
 } optdef_t;
 
 
@@ -34,51 +35,24 @@ typedef struct optval_s {
 } optval_t;
 
 /* **************** */
+
+/* For operating with optval_t objects */
 optval_t* optval_init(void);
 void optval_destroy(optval_t* opt);
 
 /* **************** */
 
-/** @brief Utility functions for client-server args options */
-bool allPaths(llist_t* args);
-bool allNumbers(llist_t* args);
-bool pathAndNumber(llist_t* args);
+/* Utility functions for client-server args options */
+bool allPaths(llist_t* args); /* All elements in args must be valid path strings */
+bool allNumbers(llist_t* args); /* All elements in args must be valid numbers without overflow */
+bool pathAndNumber(llist_t* args); /* args must contain no more than 2 elements: the first must be a path, the second a number */
 
 
-/** @brief Checks if #str1 is contained in #str2 */
+/* Main cmdline parsing functions */
 bool issubstr(char* str1, char* str2);
-
-/** 
- * @brief Splits comma-separated arguments (e.g.: file1,file2,file3 -> {file1; file2; file3})
- */
 llist_t* splitArgs(char* str);
-
-/** 
- * @brief Parses an option from an array of strings using the
- * definitions in #options and writes the content in #opt.
- * @param argc -- Pointer to length of argv.
- * @param options -- An array of options definitions.
- * @param optlen -- Length of #options.
- * @param opt -- Pointer to optval_t object in which to write the
- * option found (or NULL on error).
- * @return 0 on success, -1 on error.
- * Possible errors are:
- *	- EINVAL: invalid arguments or unrecognized option.
- */
 int parseOption(int argc, char* argv[], optdef_t options[], int optlen, optval_t* opt, int* offset);
-
-/**
- * @brief Parses command line arguments specified in #argv, basing on the
- * option definitions in #options and returns a (heap-allocated) array of
- * optval_t objects in *#result.
- * @param options -- An array of options definitions.
- * @param optlen -- Length of #options.
- * @return A LinkedList of all optval_t object created by parsing argv on
- * success, NULL on error.
- */
-llist_t* parseCmdLine(int argc, char* argv[], optdef_t options[], int optlen);
-
-
 char* printOptParseError(int err);
+llist_t* parseCmdLine(int argc, char* argv[], optdef_t options[], int optlen);
 
 #endif /* _ARGPARSER_H */

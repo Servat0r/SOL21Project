@@ -20,9 +20,19 @@ static int serverfd = -1;
 
 
 /**
- * @brief
+ * @brief Tries to open a connection to the socket whose address is sockname.
+ * This function opens a non-blocking socket file (saved in serverfd), such that
+ * if an attempt to connect fails with error 'EAGAIN', this function waits for
+ * #msec milliseconds before retrying, until the timeout specified in #abstime
+ * expires.
  * @return 0 on success, -1 on error (errno set).
  * Possible errors are:
+ *	- EINVAL: invalid arguments (NULL sockname or negative sleep time);
+ *	- EISCONN: there is already an active connection;
+ *	- any error returned by 'socket', 'connect', 'poll', 'clock_gettime', 
+ *	'timerfd_create' and 'timerfd_settime' system calls;
+ *	- ETIMEDOUT if timeout has expired and a connection has not yet successfully
+ *	established.
  */
 int openConnection(const char* sockname, int msec, const struct timespec abstime){
 	if (!sockname || msec < 0){ errno = EINVAL; return -1; }
@@ -88,9 +98,12 @@ int openConnection(const char* sockname, int msec, const struct timespec abstime
 
 
 /**
- * @brief
+ * @brief Closes connection to the server whose address is #sockname and sets
+ * serverfd to -1 (i.e., no active connections).
  * @return 0 on success, -1 on error (errno set).
  * Possible errors are:
+ *	- ENOTCONN: serverfd < 0, i.e. there is no active connection;
+ *	- EINVAL: sockname is NULL or it is a different socket address.
  */
 int closeConnection(const char* sockname){
 	if (serverfd < 0){ /* Not connected */
@@ -112,9 +125,20 @@ int closeConnection(const char* sockname){
 
 //TODO For now the '-D' option is NOT supported and there are NO files sent back by server
 /**
- * @brief
+ * @brief Tries to open a file in the server with the absolute path #pathname.
+ * @param pathname -- Absolute path of the file to open.
+ * @param flags -- Specifies additional behaviour: if (flags & O_CREATE), it tries to
+ * create a new file in the server with that pathname; if (flags & O_LOCK), it tries to
+ * open a file in locked-mode, i.e. no other one can read or write on this file: if file
+ * is already locked by anyone else, it blocks until lock on file is released.
+ *
+ * NOTE: For now O_LOCK is not really supported.
+ *
  * @return 0 on success, -1 on error (errno set).
  * Possible errors are:
+ *	- EINVAL: invalid pathname or unknown flags specified;
+ *	- ENOMEM: unable to allocate memory for sending request to server;
+ *	- any error returned by msend/mrecv or by the server (M_ERR received).
  */
 int openFile(const char* pathname, int flags){
 	if (!pathname || (flags && !(flags & O_CREATE) && !(flags & O_LOCK))){ /* NULL pathname or invalid flags */
@@ -151,9 +175,13 @@ int openFile(const char* pathname, int flags){
 
 
 /**
- * @brief
+ * @brief Closes file identified by absolute path #pathname.
  * @return 0 on success, -1 on error (errno set).
  * Possible errors are:
+ *	- EINVAL: pathname is NULL;
+ *	- ENOMEM: unable to allocate memory to send request to the server;
+ *	- EBADMSG if a message different from M_OK / M_ERR has been received;
+ *	- any error returned by msend/mrecv or by the server (M_ERR received).
  */
 int closeFile(const char* pathname){
 	if (!pathname){
@@ -192,9 +220,15 @@ int closeFile(const char* pathname){
 
 
 /**
- * @brief
+ * @brief Reads file identified by #pathname from server, returning its content
+ * in *buf and its byte-size in *size.
  * @return 0 on success, -1 on error (errno set).
  * Possible errors are:
+ *	- EINVAL: one of the arguments is NULL;
+ *	- ENOMEM: unable to allocate memory to send request to server;
+ *	- EBADMSG if a message different from M_OK/M_ERR/M_GETF is received,
+ *	or if M_GETF is received more than one time;
+ *	- any error returned by msend/mrecv or by server (M_ERR received).
  */
 int readFile(const char* pathname, void** buf, size_t* size){
 	if (!pathname || !buf || !size){ errno = EINVAL; return -1; }
@@ -233,9 +267,20 @@ int readFile(const char* pathname, void** buf, size_t* size){
 
 //TODO For now ('-D' not supported), received messages of type 'M_GETF' are discarded
 /**
- * @brief
+ * @brief Appends at most #size bytes of the content pointed by #buf to file #pathname.
+ * If #dirname is NOT NULL and server sends back any expelled file (M_GETF), content is 
+ * saved in folder pointed by #dirname by replicating the ENTIRE absolute path inside it,
+ * else if #dirname is NULL, any file received by server is discarded.
+ *
+ * NOTE: For now the option to save file content in a directory is not supported, so
+ * argument dirname is always treated as it was NULL.
+ *
  * @return 0 on success, -1 on error (errno set).
  * Possible errors are:
+ * 	- EINVAL: at least one or #pathname, #buf or #dirname is NULL;
+ *	- ENOMEM: unable to allocate memory to send request to server;
+ *	- EBADMSG: a message different from M_OK/M_ERR/M_GETF is received;
+ *	- any error returned by msend/mrecv or by the server (M_ERR received).
  */
 int appendToFile(const char* pathname, void* buf, size_t size, const char* dirname){
 	if (!pathname || !buf || !dirname){ errno = EINVAL; return -1; }
@@ -266,11 +311,13 @@ int appendToFile(const char* pathname, void* buf, size_t size, const char* dirna
 	return res;
 }
 
+
 int	readNFiles(int N, const char* dirname){
 	errno = ENOTSUP;
 	perror("readNFiles");
 	return -1;	
 }
+
 
 int writeFile(const char* pathname){
 	errno = ENOTSUP;

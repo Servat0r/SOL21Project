@@ -6,7 +6,11 @@
 
 #include <argparser.h>
 
-
+/**
+ * @brief Checks if all elements in args are valid path strings.
+ * @return true if condition is verified, false otherwise or if
+ * args is NULL.
+ */
 bool allPaths(llist_t* args){
 	llistnode_t* node;
 	if (!args) return false;
@@ -16,6 +20,13 @@ bool allPaths(llist_t* args){
 	return true;
 }
 
+
+/**
+ * @brief Checks if all elements in args are valid numbers fitting
+ * into a long variable without overflow.
+ * @return true if condition is verified, false otherwise or if
+ * args is NULL.
+ */
 bool allNumbers(llist_t* args){
 	long l = 0;
 	llistnode_t* node;
@@ -26,6 +37,14 @@ bool allNumbers(llist_t* args){
 	return true;
 }
 
+
+/**
+ * @brief Checks if args is made up by at least one and most two
+ * elements: the first must be a valid pathname, while the second
+ * must be a valid number (fit into a long var without overflow).
+ * @return true if condition is verified, false otherwise or if
+ * args is NULL.
+ */
 bool pathAndNumber(llist_t* args){
 	if (!args) return false;
 	if (args->size > 2 || args->size < 1) return false;
@@ -33,6 +52,12 @@ bool pathAndNumber(llist_t* args){
 	return isPath(args->head->datum) && (args->size == 2 ? (getInt(args->tail->datum, &l) == 0) : true);
 }
 
+
+/**
+ * @brief Checks if first string is entirely contained in second one.
+ * @return true if condition is verified, false otherwise or if any
+ * of the two strings is NULL.
+ */
 bool issubstr(char* str1, char* str2){
 	if (!str1 || !str2) return false;
 	size_t n = strlen(str1); 
@@ -45,6 +70,7 @@ bool issubstr(char* str1, char* str2){
 /**
  * @brief Initializes an optval_t object for direct use into
  * a parseCmdLine call.
+ * @return Pointer to an optval_t object on success, NULL on error.
  */
 optval_t* optval_init(void){
 	optval_t* opt = malloc(sizeof(optval_t));
@@ -60,6 +86,10 @@ optval_t* optval_init(void){
 
 /**
  * @brief Destroys an optval_t object by freeing all its arguments.
+ * NOTE: This function makes assumption that ALL optval->args elements
+ * are HEAP-allocated and not already destroyed: this is necessary for
+ * use in parseCmdLine function and after cmdline parsing as a general
+ * freeing function.
  */
 void optval_destroy(optval_t* opt){
 	if (!opt) return;
@@ -89,11 +119,6 @@ static int matchOption(char* str, optdef_t options[], int optlen){
 	return optlen;
 }
 
-static bool isOption(char* str){
-	if (!str) return false;
-	if (strlen(str) <= 1) return false;
-	return ((str[0] == '-') && !isdigit(str[1]));
-}
 
 /**
  * @brief Splits a single (argument) string into multiple argument values
@@ -101,6 +126,9 @@ static bool isOption(char* str){
  * copy for all found arguments.
  * NOTE: This function considers ",," as an empty string argument rather
  * than skipping the two commas at all (like strtok/strtok_r).
+ * NOTE: This function does NOT considers symbols like ' or " as delimiting
+ * a single token, so an argument that is provided with them even in argv,
+ * like \"~/a, b.txt\" is split into {"\"~/a", "b.txt\""} rather than {"\"~a, b.txt\""}.
  * @return A LinkedList of a copy for all found arguments on success (may
  * be empty if str == "\0", otherwise it has at least one element), NULL
  * on error.
@@ -189,10 +217,9 @@ int parseOption(int argc, char* argv[], optdef_t options[], int optlen, optval_t
 	int j = 0;
 	int k = optlen;
 	while (ret < argc) {
-		if (argv[ret] == NULL) break; /* End of array */ //FIXME Non si arriva MAI a eseguire questa istruzione!
+		if (argv[ret] == NULL) break; /* End of array */
 		currArgs = splitArgs(argv[ret] + *offset);
 		if (!currArgs) return -1; /* E' responsabilità del chiamante liberare la linkedlist 'args' se necessario */
-		if (currArgs->size == 0) return 0; //FIXME La size NON E' MAI 0!
 		llist_modif_foreach(currArgs, &node){
 			k = matchOption(node->datum, options, optlen);
 			if ((k >= 0) && (k < optlen)) break; /* Option matched -> end of argument scanning */
@@ -216,6 +243,12 @@ int parseOption(int argc, char* argv[], optdef_t options[], int optlen, optval_t
 	return ret; /* All okay */
 }
 
+
+/**
+ * @brief Provides a string output for parseOption errors.
+ * @return A string describing error when #err < 0,
+ * "Unknown error code" otherwise.
+ */
 char* printOptParseError(int err){
 	switch(err){
 		case -1:
@@ -233,11 +266,27 @@ char* printOptParseError(int err){
 	}
 }
 
+
+/**
+ * @brief Parses a command line arguments array using an array of option definitions
+ * provided as optdef_t objects.
+ * @param argv -- NULL-terminated array of command line arguments.
+ * @param argc -- Length of argv (without considering the NULL entry).
+ * @param options -- Array (NOT NULL-terminated) of optdef_t objects providing all
+ * needed options definitions.
+ * @param optlen -- Length of options.
+ * @return A LinkedList of optval_t objects each one containing a (correctly) parsed
+ * option and all its found arguments as another LinkedList. All this object is HEAP-
+ * allocated and must be freed with a llist_destroy({name of list}, optval_destroy)
+ * when no more used. By default, if a unique option is found a second time, it is
+ * discarded (i.e., only the first occurrence is retained). On error, this function
+ * returns NULL as if parsing has never started.
+ */
 llist_t* parseCmdLine(int argc, char* argv[], optdef_t options[], int optlen){
 	if (!argv || !options || (optlen < 0) || (argc < 0)) return NULL;
 	llist_t* result = llist_init();
 	if (!result) return NULL;
-	llist_t* uniques = llist_init(); /* List of pointers to unique options (optdef) */
+	llist_t* uniques = llist_init(); /* List of pointers to unique options (optdef), used for checking duplicated unique options */
 	if (!uniques){
 		llist_destroy(result, free);
 		return NULL;
@@ -282,54 +331,3 @@ llist_t* parseCmdLine(int argc, char* argv[], optdef_t options[], int optlen){
 	llist_destroy(uniques, dummy); /* No assumption can be made on 'options' elements allocation */
 	return result;
 }
-
-
-#if 0
-	while (j < options[index].minargs) {
-		currArgs = splitArgs(argv[ret] + *offset);
-		if (!currArgs) return -1;
-		llist_foreach(currArgs, node){
-			k = matchOption(node->datum, options, optlen);
-			if ((k > 0) && (k < optlen)) break; /* Option matched -> end of argument scanning */
-			else k = 0;
-			j++;
-			*offset += strlen(node->datum);
-			char* out;
-			llist_iter_remove(currArgs, node, &out);
-			llist_push(args, out);
-			if (j >= options[index].minargs) break; /* All other items are useless */
-		}
-		llist_destroy(currArgs, free);
-		if (k > 0) break;
-		if (*offset >= strlen(argv[ret])){
-			*offset = 0;
-			ret++;
-		}
-	}
-	if (!options[index].checkFun(args)) return -6; /* One or more invalid arguments */
-	if (j < options[index].minargs) return -4; /* Less than minargs */
-	while (true){ //FIXME Sure??
-		currArgs = splitArgs(argv[ret] + *offset);
-		if (!currArgs) return -1;
-		llist_foreach(currArgs, node){
-			k = matchOption(node->datum, options, optlen);
-			if ((k > 0) && (k < optlen)) break; /* Option matched -> end of argument scanning */
-			else k = 0;
-			j++;
-			*offset += strlen(node->datum);
-			char* out;
-			llist_iter_remove(currArgs, node, &out);
-			llist_push(args, out);
-			if ((options[index].maxargs >= 0) && (j >= options[index].maxargs)) break; /* All other items are useless */
-		}
-		llist_destroy(currArgs, free);
-		if (k > 0) break;
-		if (*offset >= strlen(argv[ret])){
-			*offset = 0;
-			ret++;
-		}
-	}
-	if (!options[index].checkFun(args)) return -6; /* One or more invalid arguments */
-	if (j > options[index].minargs) return -5; /* More than maxargs */
-	return ret; /* All okay */
-#endif
