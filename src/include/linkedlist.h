@@ -29,13 +29,20 @@ int
 	llist_pop(llist_t*, void**),
 	llist_insert(llist_t*, int, void*),
 	llist_remove(llist_t*, int, void**),
-	llist_iter_remove(llist_t*, llistnode_t*, void**), /* For when iterating on list */
+	llist_iter_remove(llist_t*, llistnode_t**, void**), /* For when iterating on list */
 	llist_destroy(llist_t*, void(*)(void*)),
 	llist_dump(llist_t*, FILE*);
 
-/* Iterator on linkedlist (list : llist_t, tmpnode : llistnode_t, datum : void*) */
+/** Iterator on linkedlist (list : llist_t, tmpnode : llistnode_t, datum : void*)
+ * NOTE: This iterator does NOT support removal of elements during iteration
+ */
 #define llist_foreach(list, tmpnode) \
-	for (tmpnode = list->head; tmpnode!=NULL; tmpnode=tmpnode->next)
+	for (tmpnode = list->head; tmpnode!=NULL; tmpnode=(tmpnode ? tmpnode->next : NULL))
 
+/**
+ * Removal-safe iterator on linkedlist.
+ */
+#define llist_modif_foreach(list, tmpnode) \
+	for (*tmpnode = list->head; *tmpnode!=NULL; *tmpnode=(*tmpnode ? *tmpnode->next : NULL))
 
 #endif /* _LINKEDLIST_H */

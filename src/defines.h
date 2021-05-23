@@ -31,7 +31,7 @@
 /**
  * @brief Dummy function for when there is nothing to free.
  */
-static void dummy(void* arg){ return ; }
+static void dummy(void* arg) { return ; }
 
 /** @brief Checks whether a system call fails and if yes, prints the
  * corresponding error and exits.

@@ -98,29 +98,29 @@ int	llist_remove(llist_t* l, int index, void** out){
  *	- EINVAL: invalid arguments l or out (a NULL node is
  *	considered "end-of-list").
  */
-int	llist_iter_remove(llist_t* l, llistnode_t* node, void** out){
+int	llist_iter_remove(llist_t* l, llistnode_t** node, void** out){
 	if (!l || !out) return -1;
 	if (!node) return 0; /* Iteration ended */
-	if (l->size == 0) return 1;
-	else if ((node == l->head) || (l->size == 1)){
+	if (l->size == 0) return 0;
+	else if ((*node == l->head) || (l->size == 1)){
 		int ret = llist_pop(l, out);
-		node = l->head;
+		*node = NULL;
 		return ret;
-	} else if (node == l->tail){
-		*out = node->datum;
-		node->prev->next = NULL; /* size >= 2 => this is defined */
-		l->tail = node->prev;
-		free(node);
+	} else if (*node == l->tail){
+		*out = (*node)->datum;
+		(*node)->prev->next = NULL; /* size >= 2 => this is defined */
+		l->tail = (*node)->prev;
+		free(*node);
 		l->size--;
-		node = NULL; /* Iteration ended */
+		*node = l->tail; /* Iteration ended */
 	} else { /* l->size >= 2 && node != l->head/l->tail */
-		*out = node->datum;
-		node->prev->next = node->next;
-		node->next->prev = node->prev;
-		llistnode_t* aux = node->next;
-		free(node);
+		*out = (*node)->datum;
+		(*node)->prev->next = (*node)->next;
+		(*node)->next->prev = (*node)->prev;
+		llistnode_t* aux = (*node)->prev;
+		free(*node);
 		l->size--;
-		node = aux; /* Continues iteration */
+		*node = aux; /* Continues iteration */
 	}
 	return 0;
 }

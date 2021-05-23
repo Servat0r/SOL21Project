@@ -1,7 +1,7 @@
 #include <client_server_API.h>
 #include <poll.h>
 #include <sys/timerfd.h>
-//#include <dirscan.h>
+#include <dir_utils.h>
 
 
 

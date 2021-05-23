@@ -1,3 +1,8 @@
+/**
+ * @brief Simple test for the dir_utils functions (loadFile, saveFile, dirscan).
+ *
+ * @author Salvatore Correnti.
+ */
 #include <dir_utils.h>
 #include <sys/types.h>
 #include <sys/stat.h>
