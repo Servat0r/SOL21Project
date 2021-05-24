@@ -1,8 +1,17 @@
+/**
+ * @brief Implementation of che client-server API.
+ *
+ * NOTE: In ALL functions that exchange messages with the server, we suppose that either:
+ *	1) The server ALWAYS sends back a message M_OK/M_ERR for indicating that operation has completed;
+ *	2) The server has been prematurely terminated and so a msg_recv reads EOF from server, thus
+ *	invalidating ALL the subsequent content and the corresponding calling fuction fails.
+ *
+ * @author Salvatore Correnti.
+ */
 #include <client_server_API.h>
 #include <poll.h>
 #include <sys/timerfd.h>
 #include <dir_utils.h>
-
 
 
 /** 
@@ -10,12 +19,13 @@
  *	- serverAddr is the server address;
  *	- addrLen is max server address length (UNIX_PATH_MAX is defined in defines.h);
  *	- serverfd is the file descriptor of the current open socket for connection
- *	to the server, or is -1 iff there is no active connection.
+ *	to the server, or is -1 iff there is no active connection, i.e. it is set to be
+ * 	>= 0 if and only if there is an open connection to the server (in which case it
+ *	is the corresponding fd), and -1 otherwise.
  */
 static struct sockaddr_un serverAddr;
 static const socklen_t addrLen = UNIX_PATH_MAX;
 static int serverfd = -1;
-
 
 
 
@@ -58,11 +68,15 @@ int openConnection(const char* sockname, int msec, const struct timespec abstime
 	int res, tfd; /* Result of successive connect/poll calls; timer file descriptor */
 	struct pollfd pfd;
 	memset(&pfd, 0, sizeof(pfd));
-	serverfd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0);
+	serverfd = socket(AF_UNIX, SOCK_STREAM, 0);
 	if (serverfd == -1){
 		perror("openConnection");
 		return -1; /* Failed to open socket */
 	} else {
+		/* Set serverfd to nonblocking mode */
+		int sockflags = fcntl(serverfd, F_GETFL, 0);
+		fcntl(serverfd, F_SETFL, O_NONBLOCK);
+		
 		tfd = timerfd_create(CLOCK_REALTIME, 0);
 		if (tfd == -1) return -1;
 		pfd.fd = tfd;
@@ -75,6 +89,7 @@ int openConnection(const char* sockname, int msec, const struct timespec abstime
 				res = connect(serverfd, &serverAddr, UNIX_PATH_MAX);
 				if (res == 0){
 					close(tfd);
+					fcntl(serverfd, F_SETFL, sockflags); /* Resets to blocking socket */
 					return 0;
 				} else if (errno == EAGAIN){
 					res = poll(&pfd, 1, msec);
@@ -138,6 +153,8 @@ int closeConnection(const char* sockname){
  * Possible errors are:
  *	- EINVAL: invalid pathname or unknown flags specified;
  *	- ENOMEM: unable to allocate memory for sending request to server;
+ *	- EBADMSG: wrong message received by server or EOF read by a mrecv before
+ *		having received all current message content;
  *	- any error returned by msend/mrecv or by the server (M_ERR received).
  */
 int openFile(const char* pathname, int flags){
@@ -146,7 +163,7 @@ int openFile(const char* pathname, int flags){
 		perror("openFile");
 		return -1;
 	}
-	int res;
+	int res = 0;
 	message_t* msg;
 	packet_t* p = packet_openf(pathname, &flags);
 	if (!p){ errno = ENOMEM; return -1; }
@@ -154,19 +171,24 @@ int openFile(const char* pathname, int flags){
 	/* Creates message and sends to server */
 	SYSCALL_RETURN(msend(serverfd, &msg, M_OPENF, p, "openFile: while creating message to send", "openFile: while creating message to send"), -1, NULL);
 
-	/* Receives message(s) from server */
-	SYSCALL_RETURN(mrecv(serverfd, &msg, "openFile: while creating data to receive message", "openFile: while receiving message from server"), -1, NULL);
-
 	/* Decodes message */
-	if (msg->type == M_ERR){
-		errno = *((int*)msg->args[0].content); /* Error on server */
-		res = -1;
-	} else if (msg->type = M_OK){
-		errno = 0;
-		res = 0;
-	} else { /* Bad message */
-		errno = EBADMSG;
-		res = -1;
+	while (true){
+		/* Receives message(s) from server */
+		SYSCALL_RETURN(mrecv(serverfd, &msg, "openFile: while creating data to receive message", 
+			"openFile: while receiving message from server"), -1, NULL);
+		if (msg->type == M_ERR){
+			errno = *((int*)msg->args[0].content); /* Error on server */
+			res = -1;
+			break;
+		} else if (msg->type == M_OK){
+			res = 0;
+			break;
+		} else { /* Bad message */
+			errno = EBADMSG;
+			res = -1;
+			msg_destroy(msg, free, free);
+			continue;
+		}
 	}
 	msg_destroy(msg, free, free);
 	
@@ -180,7 +202,8 @@ int openFile(const char* pathname, int flags){
  * Possible errors are:
  *	- EINVAL: pathname is NULL;
  *	- ENOMEM: unable to allocate memory to send request to the server;
- *	- EBADMSG if a message different from M_OK / M_ERR has been received;
+ *	- EBADMSG: wrong message received by server or EOF read by a mrecv before
+ *		having received all current message content;
  *	- any error returned by msend/mrecv or by the server (M_ERR received).
  */
 int closeFile(const char* pathname){
@@ -189,7 +212,7 @@ int closeFile(const char* pathname){
 		perror("closeFile");
 		return -1;
 	}
-	int res;
+	int res = 0;
 	message_t* msg;
 	packet_t* p = packet_closef(pathname);
 	if (!p){ errno = ENOMEM; return -1; }
@@ -198,20 +221,25 @@ int closeFile(const char* pathname){
 	SYSCALL_RETURN(msend(serverfd, &msg, M_CLOSEF, p, "closeFile: while creating message to send", 
 		"closeFile: while creating message to send"), -1, NULL);
 
-	/* Receives message(s) from server */
-	SYSCALL_RETURN(mrecv(serverfd, &msg, "closeFile: while creating data to receive message",
-		"closeFile: while receiving message from server"), -1, NULL);
-
 	/* Decodes message */
-	if (msg->type == M_ERR){
-		errno = *((int*)msg->args[0].content); /* Error on server */
-		res = -1;
-	} else if (msg->type = M_OK){
-		errno = 0;
-		res = 0;
-	} else { /* Bad message */
-		errno = EBADMSG;
-		res = -1;
+	while (true){
+		/* Receives message(s) from server */
+		SYSCALL_RETURN(mrecv(serverfd, &msg, "closeFile: while creating data to receive message",
+			"closeFile: while receiving message from server"), -1, NULL);
+		if (msg->type == M_ERR){
+			errno = *((int*)msg->args[0].content); /* Error on server */
+			res = -1;
+			break;
+		} else if (msg->type == M_OK){
+			res = 0;
+			break;
+		} else { /* Bad message */
+			errno = EBADMSG;
+			error = 1;
+			res = -1;
+			msg_destroy(msg, free, free);
+			continue;
+		}
 	}
 	msg_destroy(msg, free, free);
 	
@@ -226,8 +254,8 @@ int closeFile(const char* pathname){
  * Possible errors are:
  *	- EINVAL: one of the arguments is NULL;
  *	- ENOMEM: unable to allocate memory to send request to server;
- *	- EBADMSG if a message different from M_OK/M_ERR/M_GETF is received,
- *	or if M_GETF is received more than one time;
+ *	- EBADMSG: wrong message received by server or EOF read by a mrecv before
+ *		having received all current message content;
  *	- any error returned by msend/mrecv or by server (M_ERR received).
  */
 int readFile(const char* pathname, void** buf, size_t* size){
@@ -259,13 +287,14 @@ int readFile(const char* pathname, void** buf, size_t* size){
 			errno = EBADMSG;
 			res = -1;
 			msg_destroy(msg, free, free);
+			continue;
 		} /* Wrong message received */
 	}
 	msg_destroy(msg, free, free);
 	return res;
 }
 
-//TODO For now ('-D' not supported), received messages of type 'M_GETF' are discarded
+
 /**
  * @brief Appends at most #size bytes of the content pointed by #buf to file #pathname.
  * If #dirname is NOT NULL and server sends back any expelled file (M_GETF), content is 
@@ -279,7 +308,8 @@ int readFile(const char* pathname, void** buf, size_t* size){
  * Possible errors are:
  * 	- EINVAL: at least one or #pathname, #buf or #dirname is NULL;
  *	- ENOMEM: unable to allocate memory to send request to server;
- *	- EBADMSG: a message different from M_OK/M_ERR/M_GETF is received;
+ *	- EBADMSG: wrong message received by server or EOF read by a mrecv before
+ *		having received all current message content;
  *	- any error returned by msend/mrecv or by the server (M_ERR received).
  */
 int appendToFile(const char* pathname, void* buf, size_t size, const char* dirname){
@@ -300,11 +330,17 @@ int appendToFile(const char* pathname, void* buf, size_t size, const char* dirna
 		} else if (msg->type == M_OK){
 			res = 0;
 			break;
-		} else if (msg->type == M_GETF) msg_destroy(msg, free, free);
-		else { /* Wrong message received */
-			errno = EBADMSG;
+		} else if (msg->type == M_GETF){
+			if (saveFile((const char*)msg->args[0].content, dirname, msg->args[1].content, msg->args[1].len) == -1){
+				perror("appendToFile:while saving received file");
+			}
 			msg_destroy(msg, free, free);
+			continue; /* Continues loop */
+		} else { /* Wrong message received */
+			errno = EBADMSG;
 			res = -1;
+			msg_destroy(msg, free, free);
+			continue;
 		}
 	}
 	msg_destroy(msg, free, free); /* M_OK / M_ERR */
@@ -312,10 +348,61 @@ int appendToFile(const char* pathname, void* buf, size_t size, const char* dirna
 }
 
 
+/**
+ * @brief Reads #N "random" files from server - or ALL files if N <= 0 -
+ * and saves them into the directory #dirname if not NULL, otherwise it
+ * discards all read files.
+ * @return 0 on success, -1 on error (errno set).
+ * Possible errors are:
+ *	- ENOMEM: unable to allocate memory for sending request to the server;
+ *	- EMFILE: too many files sent back by server (returned only if N > 0);
+ *	- EBADMSG: wrong message received by server or EOF read by a mrecv before
+ *		having received all current message content;
+ *	- all errors returned by msend/mrecv or by the server (M_ERR received).
+ */
 int	readNFiles(int N, const char* dirname){
-	errno = ENOTSUP;
-	perror("readNFiles");
-	return -1;	
+	int res = 0;
+	int count = 0;
+	message_t* msg;
+	packet_t* p = packet_readnf(pathname, &N);
+	if (!p){ errno = ENOMEM; return -1; }
+	SYSCALL_RETURN(msend(serverfd, &msg, M_READNF, p, "readNFiles: while creating message to send", 
+		"readNFiles: while sending message to server"), -1, NULL);
+	while (true){
+		SYSCALL_RETURN(mrecv(serverfd, &msg, "readNFiles: while creating data to receive message",
+			"readNFiles: while receiving message from server"), -1, NULL);
+		if (msg->type == M_OK){
+			res = 0;
+			break;
+		} else if (msg->type == M_ERR){
+			errno = *((int*)msg->args[0].content);
+			res = -1;
+			break;
+		} else if (msg->type == M_GETF){
+			if (((N > 0) && (count < N)) || (N <= 0)){
+				count++;
+				/* If dirname == NULL, saveFile does not do anything and returns 1 */
+				if (saveFile((const char*)msg->args[0].content, dirname, msg->args[1].content, msg->args[1].len) == -1){
+					int errno_copy = errno;
+					fprintf(stderr, "readNFiles: while reading file #%d (%s) from server\n", count,(char*)msg->args[0].content);
+					errno = errno_copy;
+					perror(NULL);
+				}
+			} else {
+				errno = EMFILE; /* Too many "available" files */
+				res = -1;
+			}
+			continue;
+			msg_destroy(msg, free, free);
+		} else { /* Wrong message */
+			errno = EBADMSG;
+			res = -1;
+			msg_destroy(msg, free, free);
+			continue;
+		}
+	}
+	msg_destroy(msg, free, free);
+	return res;
 }
 
 

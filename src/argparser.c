@@ -109,7 +109,7 @@ void optval_destroy(optval_t* opt){
  * @return Index of the first matched option in the array
  * on success, -1 on error, optlen if no matching is found.
  */
-static int matchOption(char* str, optdef_t options[], int optlen){
+static int matchOption(char* str, const optdef_t options[], const int optlen){
 	if (!str || !options) return -1;
 	int i = 0;
 	while (i < optlen){
@@ -133,6 +133,7 @@ static int matchOption(char* str, optdef_t options[], int optlen){
  * be empty if str == "\0", otherwise it has at least one element), NULL
  * on error.
  */
+//TODO Si può aggiungere (") per considerare quello che c'è in mezzo come un unico token
 llist_t* splitArgs(char* str){
 	if (!str) return NULL;
 	size_t n = strlen(str);
@@ -196,7 +197,7 @@ llist_t* splitArgs(char* str){
  *	-4: option is provided with more than its maximum number of arguments;
  *	-5: option is provided with one (or more) invalid arguments.
  */
-int parseOption(int argc, char* argv[], optdef_t options[], int optlen, optval_t* opt, int* offset){
+int parseOption(int argc, char* argv[], const optdef_t options[], const int optlen, optval_t* opt, int* offset){
 	if (!argv || !options || !opt || (optlen < 0) || (argc < 1)) return -1;
 	int ret = 0; /* Return value on success */
 	if (!offset) *offset = 0;
@@ -282,7 +283,7 @@ char* printOptParseError(int err){
  * discarded (i.e., only the first occurrence is retained). On error, this function
  * returns NULL as if parsing has never started.
  */
-llist_t* parseCmdLine(int argc, char* argv[], optdef_t options[], int optlen){
+llist_t* parseCmdLine(int argc, char* argv[], const optdef_t options[], const int optlen){
 	if (!argv || !options || (optlen < 0) || (argc < 0)) return NULL;
 	llist_t* result = llist_init();
 	if (!result) return NULL;

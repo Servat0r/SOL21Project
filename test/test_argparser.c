@@ -5,8 +5,8 @@
  */
 #include <argparser.h>
 
-optdef_t options[] = {{"-h", 0, 0, allNumbers,true},{"-w", 1, 2, pathAndNumber,false},{"-W",1,-1,allPaths,false},{"-R",0,1,allNumbers,false}};
-int optlen = 4;
+const optdef_t options[] = {{"-h", 0, 0, allNumbers,true},{"-w", 1, 2, pathAndNumber,false},{"-W",1,-1,allPaths,false},{"-R",0,1,allNumbers,false}};
+const int optlen = 4;
 
 int main(int argc, char* argv[]){
 	if (argc < 2){

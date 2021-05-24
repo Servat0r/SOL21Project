@@ -56,34 +56,41 @@ int loadFile(const char* pathname, void** buf, size_t* size){
 
 /**
  * @brief Saves a file with (absolute) path #pathname into the
- * directory #dirname.
+ * directory #dirname, or does nothing if any of #basedir or
+ * #pathname is NULL.
  * @param pathname -- An absolute pathname.
- * @return 0 on success, -1 on error (errno set).
+ * @param basedir -- Directory in which to replicate the path
+ * given by #pathname for saving file.
+ * @return 0 on success, -1 on error (errno set), 1 if any of
+ * #pathname/#basedir is NULL.
  * Possible errors are:
+ *	- EINVAL: content is NULL;
+ *	- any error returned by malloc/strncpy/strncat/open/write.
  */
-int saveFile(const char* pathname, const char* basedir, void* content, size_t size){ //[saves a file and creates all subdirs if necessary]
+int saveFile(const char* pathname, const char* basedir, void* content, size_t size){
+	if (!basedir || !pathname) return 1;
 	char* pathcopy = malloc(strlen(pathname) + 1);
 	if (!pathcopy) return -1;
 	strncpy(pathcopy, pathname, strlen(pathname) + 1);
 	char* pathdir = dirname(pathcopy);
 	size_t n = strlen(pathname) + strlen(basedir) + 2;
-	char dirtree[n];
-	memset(dirtree, 0, n);
-	strncpy(dirtree, basedir, strlen(basedir)+1);
-	strncat(dirtree, "/", 2);
-	strncat(dirtree, pathdir, strlen(pathdir) + 1);
-	if (mkdirtree(dirtree) == -1){
+	char newpath[n];
+	memset(newpath, 0, n);
+	strncpy(newpath, basedir, strlen(basedir)+1);
+	strncat(newpath, "/", 2);
+	strncat(newpath, pathdir, strlen(pathdir) + 1);
+	if (mkdirtree(newpath) == -1){
 		free(pathcopy);
 		return -1;
 	}
 	memset(pathcopy, 0, strlen(pathname) + 1);
 	strncpy(pathcopy, pathname, strlen(pathname) + 1);
-	memset(dirtree, 0, n);
-	strncpy(dirtree, basedir, strlen(basedir)+1);
-	strncat(dirtree, pathname, strlen(pathname) + 1);
+	memset(newpath, 0, n);
+	strncpy(newpath, basedir, strlen(basedir)+1);
+	strncat(newpath, pathname, strlen(pathname) + 1);
 	free(pathcopy);
 	int fd;
-	SYSCALL_RETURN((fd = open(dirtree, O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR)), -1, "While creating file");
+	SYSCALL_RETURN((fd = open(newpath, O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR)), -1, "While creating file");
 	SYSCALL_RETURN(write(fd, content, size), -1, "While writing content to file");
 	close(fd);
 	return 0;
