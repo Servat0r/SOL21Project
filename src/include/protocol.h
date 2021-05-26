@@ -9,14 +9,7 @@
 
 #include <defines.h>
 #include <util.h>
-
-
-/**
- * @brief Flags for the 'openFile' client-server API function.
- */
-#define O_CREATE 1
-#define O_LOCK 2
-
+#include <fflags.h>
 
 /**
  * @brief Types of messages that client and server can send each other.

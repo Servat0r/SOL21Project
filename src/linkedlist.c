@@ -126,6 +126,7 @@ int	llist_remove(llist_t* l, int index, void** out){
 }
 
 
+
 /**
  * @brief Removes the current node pointed by node during
  * a llist_modif_foreach iteration. If list is empty, nothing

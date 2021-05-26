@@ -41,8 +41,8 @@ void* firstTest(struct arg_s* arg){
 	char inbuf[] = "Servator1";
 	char* buf;
 	size_t size;
-	assert(fss_create(&fss, arg->pathname, 16, arg->who) == 0);
-	assert(fss_open(&fss, arg->pathname, arg->who) == -1);
+	assert(fss_create(&fss, arg->pathname, 16, arg->who, false) == 0);
+	assert(fss_open(&fss, arg->pathname, arg->who, false) == -1);
 	assert(fss_append(&fss, arg->pathname, inbuf, 9, arg->who) == 0);
 	assert(fss_append(&fss, arg->pathname, inbuf, 9, arg->who) == 0);
 	assert(fss_read(&fss, arg->pathname, &buf, &size, arg->who) == 0);
@@ -58,10 +58,10 @@ void* secondTest(struct arg_s* arg){
 	char inbuf[] = "Servator2";
 	char* buf;
 	size_t size;
-	assert(fss_create(&fss, arg->pathname, 16, arg->who) == -1);
+	assert(fss_create(&fss, arg->pathname, 16, arg->who, false) == -1);
 	
 	pthread_mutex_lock(&mtx);
-	if (fss_open(&fss, arg->pathname, arg->who) == -1) perror("fss_open"); /* One will success and the other will give the 'EBADF' error */
+	if (fss_open(&fss, arg->pathname, arg->who, false) == -1) perror("fss_open"); /* One will success and the other will give the 'EBADF' error */
 	pthread_mutex_unlock(&mtx);
 	
 	assert(fss_append(&fss, arg->pathname, inbuf, 9, arg->who) == 0);
@@ -83,8 +83,8 @@ void* thirdTest(struct arg_s* arg){
 	char inbuf[] = STRING;
 	char* buf;
 	size_t size;
-	assert(fss_create(&fss, arg->pathname, 16, arg->who) == 0);
-	assert(fss_open(&fss, arg->pathname, arg->who) == -1);
+	assert(fss_create(&fss, arg->pathname, 16, arg->who, false) == 0);
+	assert(fss_open(&fss, arg->pathname, arg->who, false) == -1);
 	assert(fss_append(&fss, arg->pathname, inbuf, 135, arg->who) == 0);
 	assert(fss_read(&fss, arg->pathname, &buf, &size, arg->who) == 0);
 	fss_close(&fss, arg->pathname, arg->who);
@@ -95,7 +95,7 @@ void* thirdTest(struct arg_s* arg){
 
 /** @brief Fourth testcase thread function */
 void* fourthTest(struct arg_s* arg){
-	assert(fss_create(&fss, arg->pathname, 16, arg->who) == 0);
+	assert(fss_create(&fss, arg->pathname, 16, arg->who, false) == 0);
 	assert(fss_close(&fss, arg->pathname, arg->who) == 0);
 	return NULL;
 }

@@ -235,7 +235,6 @@ int closeFile(const char* pathname){
 			break;
 		} else { /* Bad message */
 			errno = EBADMSG;
-			error = 1;
 			res = -1;
 			msg_destroy(msg, free, free);
 			continue;
@@ -364,7 +363,7 @@ int	readNFiles(int N, const char* dirname){
 	int res = 0;
 	int count = 0;
 	message_t* msg;
-	packet_t* p = packet_readnf(pathname, &N);
+	packet_t* p = packet_readNf(&N);
 	if (!p){ errno = ENOMEM; return -1; }
 	SYSCALL_RETURN(msend(serverfd, &msg, M_READNF, p, "readNFiles: while creating message to send", 
 		"readNFiles: while sending message to server"), -1, NULL);

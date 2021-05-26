@@ -9,13 +9,13 @@
 
 #include <defines.h>
 #include <rwlock.h>
+#include <fflags.h>
 
-/* Global flags for current file */
-#define GF_VALID 1 /* File is valid, i.e. it can be safely accessed */
-#define GF_DIRTY 2 /* File has been modified (NOT written with a writeFile) */
-#define GF_UPLOAD 4 /* A writeFile will NOT fail here (i.e. file has been created and locked) */
-#define GF_LOCKED 8 /* File is locked */
-#define GF_EXPEL 128 /* File is about to be expelled from storage */
+/* Global flags for current file (not considering O_CREATE and O_LOCK, which are exported also to client) */
+#define O_VALID 1 /* File is valid, i.e. it can be safely accessed */
+#define O_DIRTY 4 /* File has been modified (NOT written with a writeFile) */
+#define O_UPLOAD 8 /* A writeFile will NOT fail here (i.e. file has been created and locked) */
+#define O_EXPEL 128 /* File is about to be expelled from storage */
 
 
 /* Client-local flags */
@@ -33,13 +33,15 @@ typedef struct fdata_s {
 } fdata_t;
 
 fdata_t*
-	fdata_create(int, int); /* -> fss_create */
+	fdata_create(int, int, bool); /* -> fss_create */
 
 int
-	fdata_open(fdata_t*, int), /* -> fss_open */
+	fdata_open(fdata_t*, int, bool), /* -> fss_open */
 	fdata_close(fdata_t*, int), /* -> fss_close */
 	fdata_read(fdata_t*, void**, size_t*, int), /* -> fss_read */
 	fdata_write(fdata_t*, void*, size_t, int), /* (append) */
+	fdata_lock(fdata_t*, int), /* (try)lock */
+	fdata_unlock(fdata_t*, int), /* (try)unlock */
 	fdata_removeClients(fdata_t*, int*, size_t); /* removes all info of a set of clients */
 
 size_t

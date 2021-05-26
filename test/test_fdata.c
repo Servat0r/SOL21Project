@@ -8,13 +8,13 @@ int main(int argc, char* argv[]){
 	size_t size;
 	int fd = open(argv[1], O_RDONLY); /* Open disk file (and virtually connection) */
 	fdata_t* fdata;
-	fdata = fdata_create(128, fd);
+	fdata = fdata_create(128, fd, false);
 	assert(fdata);
 	buf1 = malloc(1024);
 	memset(buf1, 0, 1024);
 	ssize_t m = read(fd, buf1, 1024); /* Reads content from disk file */
 	assert(m > 0);
-	assert(fdata_open(fdata, fd) == -1); /* #Already open for fd! */
+	assert(fdata_open(fdata, fd, false) == -1); /* #Already open for fd! */
 	assert(fdata_write(fdata, buf1, 1024, fd) == 0); /* Writes data to server file (newly created) */
 	printf("Bpoint 19\n");
 	assert(fdata_read(fdata, &buf2, &size, fd) == 0); /* Reads data from server file (written before) */
@@ -25,7 +25,7 @@ int main(int argc, char* argv[]){
 	assert(memcmp(buf1, buf2, 1024) == 0);
 	int fd2 = open("/home/servator/Scrivania/pippo.h", O_CREAT | O_RDWR);
 	assert(fd2 >= 0);
-	assert(fdata_open(fdata, fd2) == 0);
+	assert(fdata_open(fdata, fd2, false) == 0);
 	buf3 = malloc(16);
 	memset(buf3, 0, 16);
 	strncpy(buf3, "ciao mondo pic\n",16);
