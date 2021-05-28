@@ -54,7 +54,7 @@ fdata_t* fdata_create(int maxclient, int creator, bool locking){ /* -> fss_creat
 	memset(fdata->clients, 0, (maxclient + 1)*sizeof(char));
 	fdata->maxclient = maxclient;
 	
-	if (rwlock_init(&fdata->lock) != 0){
+	if (pthread_rwlock_init(&fdata->lock, NULL) != 0){
 		free(fdata->clients);
 		free(fdata);
 		return NULL;
@@ -88,24 +88,24 @@ int fdata_open(fdata_t* fdata, int client, bool locking){ /* -> fss_open */
 	if ((!fdata) || (client < 0)){ errno = EINVAL; return -1; }
 	
 	/* We could need to modify shared structs */
-	rwlock_write_start(&fdata->lock);
+	pthread_rwlock_wrlock(&fdata->lock);
 	if (fdata_resize(fdata, client) == -1){
 		perror("Error while resizing #clients\n");
-		rwlock_write_finish(&fdata->lock);
+		pthread_rwlock_unlock(&fdata->lock);
 		return -1; /* Propagates ENOMEM */
 	}
-	rwlock_write_finish(&fdata->lock);
-	rwlock_read_start(&fdata->lock);
+	pthread_rwlock_unlock(&fdata->lock);
+	pthread_rwlock_rdlock(&fdata->lock);
 	
 	if ((fdata->flags & O_VALID) == 0){ /* File NOT valid */
-		rwlock_read_finish(&fdata->lock);
+		pthread_rwlock_unlock(&fdata->lock);
 		errno = EPERM;
 		return -1;
 	}
 
 	if (locking){
 		if ((fdata->flags & O_LOCK) && !(fdata->clients[client] & LF_OWNER)){ /* File is already locked by another client */
-			rwlock_read_finish(&fdata->lock);
+			pthread_rwlock_unlock(&fdata->lock);
 			return 1;
 		} else {
 			fdata->flags |= O_LOCK;
@@ -115,14 +115,14 @@ int fdata_open(fdata_t* fdata, int client, bool locking){ /* -> fss_open */
 	
 	if (!(fdata->clients[client] & LF_OPEN)) fdata->clients[client] |= LF_OPEN; /* file opened */
 	else {  /* file ALREADY open */
-		rwlock_read_finish(&fdata->lock);
+		pthread_rwlock_unlock(&fdata->lock);
 		errno = EBADF;
 		return -1;
 	}
 
 	fdata->clients[client] &= ~LF_WRITE; /* A writeFile will fail */
 
-	rwlock_read_finish(&fdata->lock);
+	pthread_rwlock_unlock(&fdata->lock);
 	
 	return 0;
 }
@@ -143,24 +143,24 @@ int fdata_close(fdata_t* fdata, int client){ /* -> fss_close */
 		return -1;
 	}
 	
-	rwlock_write_start(&fdata->lock);
+	pthread_rwlock_wrlock(&fdata->lock);
 	
 	if ((fdata->flags & O_VALID) == 0){ /* File NOT valid */
-		rwlock_write_finish(&fdata->lock);
+		pthread_rwlock_unlock(&fdata->lock);
 		errno = EPERM;
 		return -1;
 	}
 	
 	if (fdata->clients[client] & LF_OPEN) fdata->clients[client] &= ~LF_OPEN; /* file closed */
 	else { /* file NOT open */
-		rwlock_write_finish(&fdata->lock);
+		pthread_rwlock_unlock(&fdata->lock);
 		errno = EBADF;
 		return -1;
 	}
 	
 	fdata->clients[client] &= ~LF_WRITE; /* A writeFile will fail */
 	
-	rwlock_write_finish(&fdata->lock);
+	pthread_rwlock_unlock(&fdata->lock);
 
 	return 0;
 }
@@ -185,17 +185,17 @@ int fdata_read(fdata_t* fdata, void** buf, size_t* size, int client){ /* -> fss_
 	}
 	int ret = 0;
 	
-	rwlock_read_start(&fdata->lock);
+	pthread_rwlock_rdlock(&fdata->lock);
 
 	if (client > fdata->maxclient){ errno = EBADF; return -1; }
 	if ((fdata->flags & O_VALID) == 0){ /* File NOT valid */
-		rwlock_read_finish(&fdata->lock);
+		pthread_rwlock_unlock(&fdata->lock);
 		errno = EPERM;
 		return -1;
 	}
 	
 	if ((fdata->flags & O_LOCK) && !(fdata->clients[client] & LF_OWNER)){
-		rwlock_read_finish(&fdata->lock);
+		pthread_rwlock_unlock(&fdata->lock);
 		errno = EBUSY;
 		return -1;
 	}
@@ -209,14 +209,14 @@ int fdata_read(fdata_t* fdata, void** buf, size_t* size, int client){ /* -> fss_
 			*size = fdata->size;
 		}
 	} else {
-		rwlock_read_finish(&fdata->lock);
+		pthread_rwlock_unlock(&fdata->lock);
 		errno = EBADF;
 		return -1; /* file NOT open */
 	}
 
 	fdata->clients[client] &= ~LF_WRITE; /* A writeFile will fail */
 
-	rwlock_read_finish(&fdata->lock);
+	pthread_rwlock_unlock(&fdata->lock);
 	
 	return ret;
 }
@@ -243,30 +243,30 @@ int	fdata_write(fdata_t* fdata, void* buf, size_t size, int client, bool wr){
 
 	int ret = 0;
 
-	rwlock_write_start(&fdata->lock);
+	pthread_rwlock_wrlock(&fdata->lock);
 
 
 	if ((fdata->flags & O_VALID) == 0){ /* File NOT valid */
 		errno = EPERM; 
-		rwlock_write_finish(&fdata->lock);
+		pthread_rwlock_unlock(&fdata->lock);
 		return -1;
 	}
 	
 	if ((fdata->flags & O_LOCK) && !(fdata->clients[client] & LF_OWNER)){
 		errno = EBUSY;
-		rwlock_write_finish(&fdata->lock);
+		pthread_rwlock_unlock(&fdata->lock);
 		return -1;
 	}
 	
 	if (!(fdata->clients[client] & LF_OPEN)) {
 		errno = EBADF;
-		rwlock_write_finish(&fdata->lock);
+		pthread_rwlock_unlock(&fdata->lock);
 		return -1;
 	}
 	
 	if (wr && !(fdata->clients[client] & LF_WRITE)){
 		errno = EBADF;
-		rwlock_write_finish(&fdata->lock);
+		pthread_rwlock_unlock(&fdata->lock);
 		return -1;
 	}
 	
@@ -275,7 +275,7 @@ int	fdata_write(fdata_t* fdata, void* buf, size_t size, int client, bool wr){
 		if (!fdata->data){
 			errno = ENOMEM;
 			fdata->flags = fdata->flags & ~O_VALID; /* Invalid file */
-			rwlock_write_finish(&fdata->lock);
+			pthread_rwlock_unlock(&fdata->lock);
 			return -1;
 		} else {
 			fdata->size = size;
@@ -286,7 +286,7 @@ int	fdata_write(fdata_t* fdata, void* buf, size_t size, int client, bool wr){
 		void* ptr = realloc(fdata->data, newsize);
 		if (!ptr){ /* FATAL ERROR */
 			errno = ENOMEM;
-			rwlock_write_finish(&fdata->lock);
+			pthread_rwlock_unlock(&fdata->lock);
 			return -1;
 		} else {
 			fdata->data = ptr;
@@ -300,7 +300,7 @@ int	fdata_write(fdata_t* fdata, void* buf, size_t size, int client, bool wr){
 
 	fdata->clients[client] &= ~LF_WRITE; /* A writeFile will fail */
 
-	rwlock_write_finish(&fdata->lock);
+	pthread_rwlock_unlock(&fdata->lock);
 
 	return ret;
 }
@@ -318,7 +318,7 @@ int fdata_lock(fdata_t* fdata, int client){
 		return -1;
 	}
 	int ret;
-	rwlock_write_start(&fdata->lock);
+	pthread_rwlock_wrlock(&fdata->lock);
 	if ((fdata->flags & O_LOCK) && !(fdata->clients[client] & LF_OWNER)) ret = 1;
 	else {
 		fdata->flags |= O_LOCK;
@@ -328,7 +328,7 @@ int fdata_lock(fdata_t* fdata, int client){
 	
 	fdata->clients[client] &= ~LF_WRITE; /* A writeFile will fail */
 
-	rwlock_write_finish(&fdata->lock);
+	pthread_rwlock_unlock(&fdata->lock);
 	return ret;
 }
 
@@ -344,7 +344,7 @@ int fdata_unlock(fdata_t* fdata, int client){
 		return -1;
 	}
 	int ret;
-	rwlock_write_start(&fdata->lock);
+	pthread_rwlock_wrlock(&fdata->lock);
 	if (fdata->clients[client] & LF_OWNER){
 		fdata->flags &= ~O_LOCK;
 		fdata->clients[client] &= ~LF_OWNER;
@@ -352,7 +352,7 @@ int fdata_unlock(fdata_t* fdata, int client){
 	} else ret = 1;
 	
 	fdata->clients[client] &= ~LF_WRITE; /* A writeFile will fail */	
-	rwlock_write_finish(&fdata->lock);
+	pthread_rwlock_unlock(&fdata->lock);
 
 	return ret;
 }
@@ -367,16 +367,16 @@ int fdata_unlock(fdata_t* fdata, int client){
 void fdata_destroy(fdata_t* fdata){
 	if (!fdata){ errno = EINVAL; return; }
 
-	rwlock_write_start(&fdata->lock);
+	pthread_rwlock_wrlock(&fdata->lock);
 	free(fdata->clients);
 	fdata->size = 0;
 	fdata->maxclient = 0;
 
 	if (fdata->flags & O_VALID) free(fdata->data); /* File content valid */
 
-	rwlock_write_finish(&fdata->lock);
+	pthread_rwlock_unlock(&fdata->lock);
 
-	rwlock_destroy(&fdata->lock);
+	pthread_rwlock_destroy(&fdata->lock);
 
 	free(fdata);
 }
@@ -386,7 +386,7 @@ void fdata_destroy(fdata_t* fdata){
  * @brief Prints out all metadata and file content of the file.
  */
 void fdata_printout(fdata_t* fdata){
-	rwlock_read_start(&fdata->lock);
+	pthread_rwlock_rdlock(&fdata->lock);
 	printf("fdata->size = %lu\n", fdata->size);
 	printf("fdata->flags = %d\n", fdata->flags);
 	printf("locked(fdata) = ");
@@ -400,5 +400,5 @@ void fdata_printout(fdata_t* fdata){
 	printf("\nfile content: \n");
 	write(1, fdata->data, fdata->size); /* Avoid invalid reads in absence of '\0' character */
 	printf("\n");
-	rwlock_read_finish(&fdata->lock);
+	pthread_rwlock_unlock(&fdata->lock);
 }

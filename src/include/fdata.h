@@ -8,7 +8,6 @@
 #define _FDATA_H
 
 #include <defines.h>
-#include <rwlock.h>
 #include <fflags.h>
 
 /* Global flags for current file (not considering O_CREATE and O_LOCK, which are exported also to client) */
@@ -28,7 +27,7 @@ typedef struct fdata_s {
 	unsigned char flags; /* Global flags */
 	unsigned char* clients; /* Byte array of client-local flags */
 	int maxclient; /* len(clients) - 1 */
-	rwlock_t lock; /* Per leggere/scrivere il contenuto del file */
+	pthread_rwlock_t lock; /* Per leggere/scrivere il contenuto del file */
 } fdata_t;
 
 fdata_t*
