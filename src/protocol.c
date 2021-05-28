@@ -8,8 +8,7 @@
  *	message_t* msg;
  *	while (...) {
  *		msg = msg_init();
- *		packet_t* p = packet_{operation}(...);
- *		msg_make(msg, M_{operation}, p);
+ *		msg_make(msg, M_{operation}, ...);
  *		msg_send(msg, channel);
  *		msg_destroy(msg, free, nothing); //packet_t* make NO copy of any content
  * 	}
@@ -39,6 +38,7 @@
 
 #include <protocol.h>
 
+
 /** 
  * @brief Dummy function to be used with msg_destroy when you don't need to free msg.args contents.
  */
@@ -54,16 +54,20 @@ ssize_t getArgn(msg_t type){
 	switch(type){
 
 		case M_OK:
+			return 0;
+		
+		case M_ERR:
 		case M_READF:
 		case M_READNF:
-		case M_WRITEF:
 		case M_CLOSEF:
+		case M_LOCKF:
+		case M_UNLOCKF:
 		case M_REMOVEF:
 			return 1;
 
-		case M_ERR:
 		case M_OPENF:
 		case M_GETF:
+		case M_WRITEF:
 		case M_APPENDF:
 			return 2;
 		
@@ -95,102 +99,6 @@ void* packet_destroy(packet_t* p){
 	return res;
 }
 
-/** 
- * @brief All these functions create an array of packets corresponding to the API specification for
- * sending/receiving extra argument besides from message identifier (msg_t) and pathname.
- * @return A packet_t* object containing data to be sent on success, NULL on error. 
-*/
-
-packet_t* packet_openf(const char* pathname, int* flags){
-	packet_t* p = calloc(2, sizeof(packet_t));
-	if (!p) return NULL;
-	p[0].len = strlen(pathname) + 1;
-	p[0].content = pathname;
-	p[1].len = sizeof(int);
-	p[1].content = flags;
-	return p;
-}
-
-packet_t* packet_getf(const char* pathname, void* filecontent, size_t size){
-	packet_t* p = calloc(2, sizeof(packet_t));
-	if (!p) return NULL;
-	p[0].len = strlen(pathname) + 1;
-	p[0].content = pathname;
-	p[1].len = size;
-	p[1].content = filecontent;
-	return p;
-}
-
-packet_t* packet_ok(int* extrargs){
-	packet_t* p = calloc(1, sizeof(packet_t));
-	if (!p) return NULL;
-	p[0].len = sizeof(int);
-	p[0].content = extrargs;
-	return p;
-}
-
-packet_t* packet_error(int* extrargs, int* error){
-	packet_t* p = calloc(2, sizeof(packet_t));
-	if (!p) return NULL;
-	p[0].len = sizeof(errno);
-	p[0].content = error;
-	p[1].len = sizeof(int);
-	p[1].content = extrargs;
-	return p;
-}
-
-packet_t* packet_appendf(const char* pathname, void* buf, size_t size){
-	packet_t* p = calloc(2, sizeof(packet_t));
-	if (!p) return NULL;
-	p[0].len = strlen(pathname) + 1;
-	p[0].content = pathname;
-	p[1].len = size;
-	p[1].content = buf;
-	return p;
-}
-
-packet_t* packet_readf(const char* pathname){
-	packet_t* p = calloc(1, sizeof(packet_t));
-	if (!p) return NULL;
-	p[0].len = strlen(pathname) + 1;
-	p[0].content = pathname;
-	return p;
-}
-
-packet_t* packet_readNf(int* N){
-	packet_t* p = calloc(1, sizeof(packet_t));
-	if (!p) return NULL;
-	p[0].len = sizeof(int);
-	p[0].content = N;
-	return p;
-}
-
-packet_t* packet_writef(const char* pathname){
-	packet_t* p = calloc(1, sizeof(packet_t));
-	if (!p) return NULL;
-	p[0].len = strlen(pathname) + 1;
-	p[0].content = pathname;
-	return p;
-}
-
-packet_t* packet_closef(const char* pathname){
-	packet_t* p = calloc(1, sizeof(packet_t));
-	if (!p) return NULL;
-	p[0].len = strlen(pathname) + 1;
-	p[0].content = pathname;
-	return p;
-}
-
-packet_t* packet_removef(const char* pathname){
-	packet_t* p = calloc(1, sizeof(packet_t));
-	if (!p) return NULL;
-	p[0].len = strlen(pathname) + 1;
-	p[0].content = pathname;
-	return p;
-}
-
-
-
 /* ****************************** message_t functions ************************************** */
 
 /**
@@ -205,26 +113,33 @@ message_t* msg_init(void){
 	return msg;
 }
 
+
 /**
- * @brief Creates a new message_t object from an initialized message_t and 
- * an array of packet_t objects which are the other data to send.
+ * @brief Creates a new message_t object from an initialized message_t.
  * @param msg -- An initialized message (possibly NOT used after [msg_destroy
  * + ] msg_init for not losing data.
  * @param type -- Message type.
- * @param pathname -- Pathname of the file (this is ALWAYS used in message_t
- * objects for double-checking between server and client).
- * @param p -- An array of packet_t objects representing the extra arguments
- * for that message type (usually made with packet_* functions).
- * @return 0 on success, -1 on error. Possible errors are:
- *	- ENAMETOOLONG (pathname troppo lungo).
+ * @param ... -- For each argument arg to send, the couple <l, arg> (as distinct
+ * args), where l is the size in bytes of arg.
+ * @return 0 on success, -1 on error.
  */
-int msg_make(message_t* msg, msg_t type, packet_t* p){
-	if (!msg || !p) return -1;
+int msg_make(message_t* msg, msg_t type, ...){
+	if (!msg) return -1;
 	msg->type = type;
 	msg->argn = getArgn(type);
+	packet_t* p = calloc(msg->argn, sizeof(packet_t));
+	if (!p) return -1;
+	va_list args;
+	va_start(args, type);
+	for (ssize_t i = 0; i < msg->argn; i++){
+		p[i].len = va_arg(args, size_t);
+		p[i].content = va_arg(args, void*);
+	}
+	va_end(args);
 	msg->args = p;
 	return 0;
 }
+
 
 /**
  * @brief Destroys the current message_t* object allowing for retaining message
@@ -234,17 +149,19 @@ int msg_make(message_t* msg, msg_t type, packet_t* p){
  * @param freeContent -- Pointer to function for freeing content of msg->args
  * (default 'nothing' to retain sent/received data).
  * @return 0 on success, -1 on error (msg == NULL).
- * NOTE: This function when used with free / nothing function arguments does NOT
- * modify errno, so it is safe to call it without saving errno before.
+ * NOTE: This function does NOT modify errno.
 */
 int msg_destroy(message_t* msg, void (*freeArgs)(void*), void (*freeContent)(void*)){
+	if (!msg) return -1;
+	int errno_copy = errno;
 	if (!freeContent) freeContent = nothing; /* default, no-action */
 	/* default, packet_t objects are heap-allocated (if argn == 0, there is no packet_t array available */
 	if (!freeArgs) freeArgs = ( msg->args ? free : nothing); /* Frees packet_t array by default only if it is not NULL */
-	if (!msg) return -1;
 	for (int i = 0; i < msg->argn; i++) freeContent(msg->args[i].content);
 	freeArgs(msg->args);
 	free(msg);
+	errno = errno_copy;
+	msg = NULL;
 	return 0;
 }
 
@@ -252,8 +169,10 @@ int msg_destroy(message_t* msg, void (*freeArgs)(void*), void (*freeContent)(voi
 /**
  * @brief Sends the message msg to file descriptor fd.
  * @return 1 on success, -1 on error during a writen, 0 if a writen returned 0.
+ * Possible errors are:
+ *	- EBADMSG: a writen has returned 0 and so the message has not been completely sent;
+ *	- any error by writen.
 */
-//FIXME Ci possono essere problemi in caso di (errno == 'EFBIG'), ovvero un file troppo grande per il socket
 int msg_send(message_t* msg, int fd){
 	ssize_t res;
 	SYSCALL_RETURN((res = writen(fd, &msg->type, sizeof(msg_t))), -1, "When writing msgtype");
@@ -294,6 +213,10 @@ int msg_send(message_t* msg, int fd){
  * having read ALL message bytes.
  * NOTE: If msg_recv returns -1, msg content is NOT valid and it should be destroyed with
  * msg_destroy(msg, nothing, nothing) (or (msg, NULL, NULL)).
+ * Possible errors are:
+ *	- ECONNRESET: EOF was read during a readn, and so the message has not been completely read;
+ *	- ENOMEM: unable to allocate memory to store received content;
+ *	-any error by readn.
 */
 int msg_recv(message_t* msg, int fd){		
 	int res;
@@ -343,26 +266,45 @@ void printMsg(message_t* req){
  * @param msg -- Address of a message_t* object (possibly not containing
  * any relevant data) in which data to be sent shall be written.
  * @param type -- A msg_t value representing message type.
- * @param p -- A packet_t pointer already initialized to be assigned to msg->args.
  * @param creatmsg -- An error message for failure in msg initialization.
  * @param sendmsg -- An error message for failure in msg sending.
+ * @param ... -- For each argument arg to send, a couple of arguments <l, arg>
+ * where l is the byte-size or arg. 
  * @return 0 on success, -1 on error.
  * Possible errors are:
  *	- ENOMEM: unable to allocate memory for msg;
- *	- all errors by msg_send.
+ *	- all errors by msg_send: EBADMSG and any error by writen.
  */
-int msend(int fd, message_t** msg, msg_t type, packet_t* p, char* creatmsg, char* sendmsg){
-	int r;
+int msend(int fd, message_t** msg, msg_t type, char* creatmsg, char* sendmsg, ...){
 	*msg = msg_init();
 	if (*msg == NULL){
 		if (creatmsg) perror(creatmsg); /* Pass them as NULL to avoid these printouts */ 
-		free(p); /* p is an array of packet_t objects created with a 'calloc' */
 		return -1;
 	}
-	msg_make(*msg, type, p); /* No need to check retval */
-	if (msg_send(*msg, fd) <= 0){ /* Message not correctly sent */
+	
+	(*msg)->argn = getArgn(type);
+	packet_t* p = calloc((*msg)->argn, sizeof(packet_t));
+	if (!p){
+		msg_destroy(*msg, nothing, nothing);
+		errno = ENOMEM;
+		return -1;
+	}
+	
+	va_list args;
+	va_start(args, sendmsg);
+	for (ssize_t i = 0; i < (*msg)->argn; i++){
+		p[i].len = va_arg(args, size_t);
+		p[i].content = va_arg(args, void*);
+	}
+	va_end(args);
+	
+	(*msg)->args = p;
+	
+	if (msg_send(*msg, fd) < 1){ /* Message not correctly sent */
 		if (sendmsg) perror(sendmsg);
+		int errno_copy = errno;
 		msg_destroy(*msg, free, nothing);
+		errno = errno_copy;
 		return -1;
 	}
 	msg_destroy(*msg, free, nothing); /* No copy on the heap */
@@ -381,7 +323,7 @@ int msend(int fd, message_t** msg, msg_t type, packet_t* p, char* creatmsg, char
  * @return 0 on success, -1 on error.
  * Possible errors are:
  *	- ENOMEM: unable to allocate memory for msg;
- *	- all errors by msg_recv.
+ *	- all errors by msg_recv: ECONNRESET and any error by readn.
  */
 int mrecv(int fd, message_t** msg, char* creatmsg, char* recvmsg){
 	*msg = msg_init();
@@ -389,8 +331,10 @@ int mrecv(int fd, message_t** msg, char* creatmsg, char* recvmsg){
 		if (creatmsg) perror(creatmsg);
 		return -1;
 	}
-	if (msg_recv(*msg, fd) <= 0){ /* Message not correctly received */
+	if (msg_recv(*msg, fd) < 1){ /* Message not correctly received */
+		int errno_copy = errno;
 		msg_destroy(*msg, NULL, NULL);
+		errno = errno_copy;
 		return -1;
 	}
 	return 0;

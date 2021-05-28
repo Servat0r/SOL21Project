@@ -15,7 +15,7 @@ int main(int argc, char* argv[]){
 	ssize_t m = read(fd, buf1, 1024); /* Reads content from disk file */
 	assert(m > 0);
 	assert(fdata_open(fdata, fd, false) == -1); /* #Already open for fd! */
-	assert(fdata_write(fdata, buf1, 1024, fd) == 0); /* Writes data to server file (newly created) */
+	assert(fdata_write(fdata, buf1, 1024, fd, false) == 0); /* Writes data to server file (newly created) */
 	printf("Bpoint 19\n");
 	assert(fdata_read(fdata, &buf2, &size, fd) == 0); /* Reads data from server file (written before) */
 	printf("Bpoint 21\n");
@@ -29,7 +29,7 @@ int main(int argc, char* argv[]){
 	buf3 = malloc(16);
 	memset(buf3, 0, 16);
 	strncpy(buf3, "ciao mondo pic\n",16);
-	assert(fdata_write(fdata, buf3, 16, fd2) == 0);
+	assert(fdata_write(fdata, buf3, 16, fd2, false) == 0);
 	free(buf3);
 	fdata_printout(fdata);
 	assert(fdata_read(fdata, &buf3, &size, fd2) == 0);			

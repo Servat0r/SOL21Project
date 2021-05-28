@@ -36,7 +36,7 @@
  * one (e.g., a writing operation causes to send the expelled files BEFORE the ok/err message):
  * their "extra" argument simply indicates how many other messages there are after them (if any).
 */
-typedef enum {M_OK, M_ERR, M_OPENF, M_READF, M_READNF, M_GETF, M_WRITEF, M_APPENDF, M_CLOSEF, M_REMOVEF} msg_t;
+typedef enum {M_OK, M_ERR, M_OPENF, M_READF, M_READNF, M_GETF, M_WRITEF, M_APPENDF, M_CLOSEF, M_LOCKF, M_UNLOCKF, M_REMOVEF} msg_t;
 
 
 /* A single information packet: len + content! */
@@ -57,19 +57,8 @@ typedef struct message_s {
 ssize_t
 	getArgn(msg_t);
 
-packet_t
-	* packet_ok(int*),
-	* packet_error(int*,int*),
-	* packet_init(size_t, void*),
-	* packet_openf(const char*, int*),
-	* packet_readf(const char*),
-	* packet_readNf(int*),
-	* packet_writef(const char*),
-	* packet_appendf(const char*, void*,size_t),
-	* packet_closef(const char*),
-	* packet_removef(const char*),
-	* packet_getf(const char*, void*, size_t);
-
+packet_t*
+	packet_init(size_t, void*);
 
 void*
 	packet_destroy(packet_t*);
@@ -78,15 +67,14 @@ message_t*
 	msg_init(void);
 
 int
-	msg_make(message_t*, msg_t, packet_t*),
+	msg_make(message_t*, msg_t, ...),
 	msg_destroy(message_t*, void(*freeArgs)(void*), void(*freeContent)(void*)),
 	msg_send(message_t*, int),
 	msg_recv(message_t*, int),
-	msend(int fd, message_t** msg, msg_t type, packet_t* p, char* creatmsg, char* sendmsg),
+	msend(int fd, message_t** msg, msg_t type, char* creatmsg, char* sendmsg, ...),
 	mrecv(int fd, message_t** msg, char* creatmsg, char* recvmsg);
 
 void
 	printMsg(message_t*);
 
 #endif /* _PROTOCOL_H */
-

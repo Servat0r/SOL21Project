@@ -41,7 +41,6 @@ int main(void){
 			msg_recv(msg, pfd[0]);
 			printf("Message received: \n");
 			printMsg(msg);
-			printf("Argument = %d\n", *((int*)msg->args[0].content));
 			msg_destroy(msg, free, free);
 
 			msg = msg_init();
@@ -78,37 +77,27 @@ int main(void){
 			int flags = 32;
 			
 			msg = msg_init();
-			packet_t* p = packet_openf("home1", &flags);
-			assert(p);
-			msg_make(msg, M_OPENF, p);
+			msg_make(msg, M_OPENF, 6, "home1", sizeof(int), &flags);
 			SYSCALL_EXIT(msg_send(msg, pfd[1]), "When sending message for openf\n");
 			msg_destroy(msg, NULL, NULL);
 			
 			msg = msg_init();
-			p = packet_ok(&flags);
-			assert(p);
-			msg_make(msg, M_OK, p);
+			msg_make(msg, M_OK);
 			SYSCALL_EXIT(msg_send(msg, pfd[1]), "When sending message for ok\n");
 			msg_destroy(msg, NULL, NULL);
 			
 			msg = msg_init();
-			p = packet_appendf("home3", "woo", 4);
-			assert(p);
-			msg_make(msg, M_APPENDF, p);
+			msg_make(msg, M_APPENDF, 6, "home3", 4, "woo");
 			SYSCALL_EXIT(msg_send(msg, pfd[1]), "When sending message for appendf\n");
 			msg_destroy(msg, NULL, NULL);
 
 			msg = msg_init();
-			p = packet_error(&error, &flags);
-			assert(p);
-			msg_make(msg, M_ERR, p);
+			msg_make(msg, M_ERR, sizeof(int), &error);
 			SYSCALL_EXIT(msg_send(msg, pfd[1]), "When sending message for error\n");
 			msg_destroy(msg, NULL, NULL);
 
 			msg = msg_init();
-			p = packet_getf("home5", "abcdef", 7);
-			assert(p);
-			msg_make(msg, M_GETF, p);
+			msg_make(msg, M_GETF, 6, "home5", 7, "abcdef");
 			SYSCALL_EXIT(msg_send(msg, pfd[1]), "When sending message for getf\n");
 			msg_destroy(msg, NULL, NULL);
 

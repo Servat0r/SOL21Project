@@ -60,29 +60,23 @@ typedef struct fss_s {
 } fss_t;
 
 
-//TODO lock_cond è usata SOLO da fss_open con O_LOCK settato e da fss_lock / fss_unlock (in particolare le ultime due faranno una wait mentre l'ultima una broadcast)
-//TODO fss_create con O_LOCK settato, fss_remove e l'algoritmo di rimpiazzamento fanno sempre una broadcast su lock_cond (in particolare la replace GARANTISCE la
-//lock in scrittura al chiamante!) per risvegliare altri thread in attesa di quel lock eventualmente rilasciato/rimosso (o magari risalente a un altro file che nel
-//frattempo è stato tolto e rimesso)
-
 int
 	/* Creation / Destruction */
 	fss_init(fss_t* fss, int nbuckets, size_t storageCap, int maxFileNo),
 	fss_destroy(fss_t* fss),
 
-	/* Privileged operations */
+	/* Modifying operations */
 	fss_create(fss_t* fss, char* pathname, int maxclient, int creator, bool locking),
 	fss_clientCleanup(fss_t*, int* clients, size_t len),
 	fss_remove(fss_t*, char* pathname, int client),
 	
-	/* Unprivileged operations that DO NOT call privileged ones */
+	/* Non-modifying operations that DO NOT call modifying ones */
 	fss_open(fss_t* fss, char* pathname, int client, bool locking),
 	fss_close(fss_t*, char* pathname, int client),
 	fss_read(fss_t*, char* pathname, void** buf, size_t*, int client),
 	
-	/* Unprivileged operations that COULD call privileged ones */
-	fss_append(fss_t*, char* pathname, void* buf, size_t size, int client),
-	fss_write(fss_t*, char* pathname, int client),
+	/* Non-modifying operations that COULD call modifying ones */
+	fss_write(fss_t*, char* pathname, void* buf, size_t size, int client, bool wr),
 	
 	/* Registrazione di cosa ogni thread vuole fare:
 	 * rop -> un'operazione che NON modifica l'insieme dei file presenti (ad es. open/close/read ma anche write/append perché queste NON aggiungono/rimuovono file)
