@@ -126,14 +126,14 @@ static int matchOption(char* str, const optdef_t options[], const int optlen){
  * copy for all found arguments.
  * NOTE: This function considers ",," as an empty string argument rather
  * than skipping the two commas at all (like strtok/strtok_r).
- * NOTE: This function does NOT considers symbols like ' or " as delimiting
- * a single token, so an argument that is provided with them even in argv,
- * like \"~/a, b.txt\" is split into {"\"~/a", "b.txt\""} rather than {"\"~a, b.txt\""}.
- * @return A LinkedList of a copy for all found arguments on success (may
- * be empty if str == "\0", otherwise it has at least one element), NULL
- * on error.
+ * NOTE: This function uses the symbol (") as a delimiting token and does NOT
+ * provide a way to insert it directly into an argument without this parsing
+ * (it is not possible to use a "double escape" character), so a cmdline argument
+ * like "\"~/a, b.txt\"" is returned as {"~/a, b.txt"}, but there is no way to
+ * represent a pathname like '~/".txt'.
+ * @return A LinkedList of a copy for all found arguments on success (may be
+ * empty if str == "\0", otherwise it has at least one element), NULL on error.
  */
-//TODO Si può aggiungere (") per considerare quello che c'è in mezzo come un unico token
 llist_t* splitArgs(char* str){
 	if (!str) return NULL;
 	size_t n = strlen(str);
@@ -143,8 +143,11 @@ llist_t* splitArgs(char* str){
 	llist_t* args = llist_init();
 	if (!args) return NULL;
 	char* arg;
+	bool quotes = false; /* true <=> we are inside a string delimited by (") */
 	for (pos = 0; pos < n; pos++){
-		if (str[pos] == ','){
+		if (str[pos] == '"'){
+			quotes = !quotes;
+		} else if ((str[pos] == ',') && !quotes){
 			arg = malloc(pos-prev+1);
 			if (!arg){
 				llist_destroy(args, free);
@@ -168,6 +171,7 @@ llist_t* splitArgs(char* str){
 	}
 	return args;
 }
+
 
 /**
  * @brief Parses an entire option with ALL its arguments (i.e., it stops
