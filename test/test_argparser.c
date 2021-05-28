@@ -1,11 +1,18 @@
 /**
- * @brief A simple testcase for cmdline argument parser with some of the client options.
+ * @brief A simple test for cmdline argument parser with some of the client options.
  *
  * @author Salvatore Correnti.
  */
 #include <argparser.h>
 
-const optdef_t options[] = {{"-h", 0, 0, allNumbers,true},{"-w", 1, 2, pathAndNumber,false},{"-W",1,-1,allPaths,false},{"-R",0,1,allNumbers,false}};
+const optdef_t options[] = {
+	{"-h", 0, 0, noArgs, true, NULL, "Shows this help message and exits"},
+	{"-w", 1, 2, pathAndNumber,false, "dirname[,num]", 
+	"scans recursively at most #num files from directory #dirname (or ALL files if #num <= 0 or it is not provided), and sends all found files to server"},
+	{"-W",1,-1,allPaths,false, "filename[,filename]", "sends to server the provided filename(s) list"},
+	{"-R",0,1,allNumbers,false, "filename[,filename]", "reads from server all files provided in the filename(s) list (if existing)"}
+};
+
 const int optlen = 4;
 
 int main(int argc, char* argv[]){
@@ -30,5 +37,8 @@ int main(int argc, char* argv[]){
 	}
 	
 	llist_destroy(optvals, optval_destroy);
+	
+	print_help(argv[0], options, optlen);
+		
 	return 0;
 }

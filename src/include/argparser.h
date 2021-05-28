@@ -25,6 +25,8 @@ typedef struct optdef_s {
 	bool (*checkFun)(llist_t* args); /* Function that checks correctness of all arguments provided to option (defaults to true if no argument is provided and
 	minargs == 0) */
 	bool isUnique; /* Flag for options that cannot be repeated */
+	char* argsyntax; /* String describing argument syntax (can be NULL if there are no arguments for this option) */
+	char* helpstr; /* Help message for this option to be showed when help option is provided */
 } optdef_t;
 
 
@@ -43,9 +45,11 @@ void optval_destroy(optval_t* opt);
 /* **************** */
 
 /* Utility functions for client-server args options */
-bool allPaths(llist_t* args); /* All elements in args must be valid path strings */
-bool allNumbers(llist_t* args); /* All elements in args must be valid numbers without overflow */
-bool pathAndNumber(llist_t* args); /* args must contain no more than 2 elements: the first must be a path, the second a number */
+bool
+	noArgs(llist_t* args), /* No argument is needed for this option */
+	allPaths(llist_t* args), /* All elements in args must be valid path strings */
+	allNumbers(llist_t* args), /* All elements in args must be valid numbers without overflow */
+	pathAndNumber(llist_t* args); /* args must contain no more than 2 elements: the first must be a path, the second a number */
 
 
 /* Main cmdline parsing functions */
@@ -54,5 +58,8 @@ llist_t* splitArgs(char* str);
 int parseOption(int argc, char* argv[], const optdef_t options[], const int optlen, optval_t* opt, int* offset);
 char* printOptParseError(int err);
 llist_t* parseCmdLine(int argc, char* argv[], const optdef_t options[], const int optlen);
+
+/* Options help message(s) printing function */
+void print_help(const char* progname, const optdef_t options[], const int optlen);
 
 #endif /* _ARGPARSER_H */

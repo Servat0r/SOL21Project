@@ -3,8 +3,20 @@
  *
  * @author Salvatore Correnti.
  */
-
 #include <argparser.h>
+
+
+/**
+ * @brief Dummy function for a no-arguments option.
+ * @return true if args is an empty linkedlist, false
+ * otherwise or if args is NULL.
+ */
+bool noArgs(llist_t* args){
+	if (!args) return false;
+	if (args->size == 0) return true;
+	return false;
+}
+
 
 /**
  * @brief Checks if all elements in args are valid path strings.
@@ -218,7 +230,6 @@ int parseOption(int argc, char* argv[], const optdef_t options[], const int optl
 		*offset = 0;
 		ret = 1;
 	} else *offset += strlen(options[index].name);
-	bool correctArgNo = (options[index].minargs ? false : true); /* #found arguments between */
 	int j = 0;
 	int k = optlen;
 	while (ret < argc) {
@@ -335,4 +346,19 @@ llist_t* parseCmdLine(int argc, char* argv[], const optdef_t options[], const in
 	}
 	llist_destroy(uniques, dummy); /* No assumption can be made on 'options' elements allocation */
 	return result;
+}
+
+
+/**
+ * @brief Prints out a formatted help message for each option definition provided.
+ * @param progname -- Name of the calling program (e.g., argv[0]).
+ * @param options -- Array of option definitions.
+ * @param optlen -- Length of optlen.
+ */
+void print_help(const char* progname, const optdef_t options[], const int optlen){
+	if (!progname || !options) return;
+	printf("Usage: %s ", progname);
+	for (int i = 0; i < optlen; i++) printf("[%s %s] ", options[i].name, (options[i].argsyntax ? options[i].argsyntax : "") );
+	printf("\n");
+	for (int i = 0; i < optlen; i++) printf("%s:\t%s\n", options[i].name, options[i].helpstr);
 }
