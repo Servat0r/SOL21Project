@@ -32,6 +32,20 @@
 #define R_CREATE 1
 #define R_WRITE 2
 
+
+/**
+ * @brief Struct for hosting <size, content> couples for fss_readN.
+ */
+typedef struct fcontent_s {
+	char* filename;
+	size_t size;
+	void* content;
+} fcontent_t;
+
+
+/**
+ * @brief Struct describing the filesystem.
+ */
 typedef struct fss_s {
 
 	icl_hash_t* fmap; /* Table of ALL current CORRECT mapping pathname->offset */
@@ -42,13 +56,13 @@ typedef struct fss_s {
 	
 	pthread_mutex_t wlock; /* Lock per far accedere gli scrittori uno alla volta */
 	
-	int lock_waiters;
-	pthread_cond_t lock_cond;
+	int lock_waiters; //FIXME Togliere
+	pthread_cond_t lock_cond; //FIXME Togliere
 	
 	int maxFileNo; /* Maximum number of storable files */
 
 	size_t storageCap; /* Storage capacity in KBytes */
-	llist_t* replQueue; /* LinkedList handled as FIFO queue for tracing file(s) to remove */
+	tsqueue_t* replQueue; /* FIFO queue for tracing file(s) to remove */
 	size_t spaceSize; /* Current total size of the occupied space */
 	
 	/* Statistics members (la mutua esclusione è garantita dal fatto che sono tutti modificati da operazioni che settano active_cwr) */
@@ -59,24 +73,35 @@ typedef struct fss_s {
 
 } fss_t;
 
+fcontent_t*
+	fcontent_init(char* pathname, size_t size, void* content);
+	
+void
+	fcontent_destroy(fcontent_t* fc);
+
 
 int
 	/* Creation / Destruction */
 	fss_init(fss_t* fss, int nbuckets, size_t storageCap, int maxFileNo),
-	fss_destroy(fss_t* fss),
+	fss_destroy(fss_t* fss), //TODO Valutare se aggiungere anche qui un waitHandler come parametro
 
 	/* Modifying operations */
-	fss_create(fss_t* fss, char* pathname, int maxclient, int creator, bool locking),
-	fss_clientCleanup(fss_t*, int* clients, size_t len),
-	fss_remove(fss_t*, char* pathname, int client),
+	//TODO Valutare se aggiungere anche qui un sendBackHandler come parametro (per rispedire indietro i file espulsi)
+	fss_create(fss_t* fss, char* pathname, int maxclient, int creator, bool locking, int (*waitHandler)(tsqueue_t* waitQueue)),
+	/* newowners_list shall contain a list of ALL awaken clients that need to be notified */
+	fss_clientCleanup(fss_t*, int client, llist_t** newowners_list),
+	/* Here the caller KNOWS that the file is being removed and does NOT need to be notified via function parameter */
+	fss_remove(fss_t*, char* pathname, int client, int (*waitHandler)(tsqueue_t* waitQueue)),
 	
 	/* Non-modifying operations that DO NOT call modifying ones */
 	fss_open(fss_t* fss, char* pathname, int client, bool locking),
 	fss_close(fss_t*, char* pathname, int client),
 	fss_read(fss_t*, char* pathname, void** buf, size_t*, int client),
+	fss_readN(fss_t*, int client, int N, llist_t* results), //TODO Implementare! <<<==
 	
 	/* Non-modifying operations that COULD call modifying ones */
-	fss_write(fss_t*, char* pathname, void* buf, size_t size, int client, bool wr),
+	fss_write(fss_t*, char* pathname, void* buf, size_t size, int client, bool wr, 
+		int (*waitHandler)(tsqueue_t* waitQueue), int (*sendBackHandler)(void* content, size_t size, int cfd)),
 	
 	/* Registrazione di cosa ogni thread vuole fare:
 	 * rop -> un'operazione che NON modifica l'insieme dei file presenti (ad es. open/close/read ma anche write/append perché queste NON aggiungono/rimuovono file)
@@ -91,13 +116,14 @@ int
 	fss_rop_end(fss_t* fss),
 	fss_wop_init(fss_t* fss),
 	fss_wop_end(fss_t* fss),
-	fss_wait(fss_t* fss),
-	fss_wakeup_end(fss_t* fss),
+	fss_wait(fss_t* fss), //TODO Eliminare
+	fss_wakeup_end(fss_t* fss), //TODO Eliminare
 	fss_op_chmod(fss_t* fss),
 	
 	/* Locking / Unlocking */
 	fss_lock(fss_t* fss, char* pathname, int client),
-	fss_unlock(fss_t* fss, char* pathname, int client); /* Questa fa SEMPRE una broadcast sulla lock_cond */
+	/* *newowner will point to an integer identifying the new file-lock owner, and will be NULL otherwise */
+	fss_unlock(fss_t* fss, char* pathname, int client, llist_t** newowner);
 
 
 void

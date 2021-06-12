@@ -33,6 +33,7 @@
  */
 static void dummy(void* arg) { return ; }
 
+
 /** @brief Checks whether a system call fails and if yes, prints the
  * corresponding error and exits.
 */
@@ -43,6 +44,7 @@ static void dummy(void* arg) { return ; }
 	exit(errno_copy);			\
     }
 
+
 /** @brief Checks whether a system call fails and if yes, prints the
  * corresponding error and sets errno to that, but WITHOUT exiting.
 */
@@ -52,6 +54,7 @@ static void dummy(void* arg) { return ; }
 	perror(str);				\
 	errno = errno_copy;			\
     }
+
 
 /**
  * @brief Identical to SYSCALL_EXIT but it returns the second argument instead
@@ -65,6 +68,7 @@ static void dummy(void* arg) { return ; }
 		return (ret);									\
 	}
 
+
 /**
  * @brief Checks the expression 'cond' and if (!cond), executes the instruction
  * specified as second argument.
@@ -75,86 +79,100 @@ static void dummy(void* arg) { return ; }
 		code \
 	}
 
+
 /**
  * @brief As CHECK_COND_EXEC, but it prints out the errno message and exits. 
  */
 #define CHECK_COND_EXIT(cond, str)	\
-    if (!cond) {				\
+    if (!(cond)) {				\
 	int errno_copy = errno;			\
 	perror(str); \
 	exit(errno_copy);			\
     }
 
+
 /**
  * @brief As CHECK_COND_PRINT, but it only prints the errno message.
  */
 #define CHECK_COND_PRINT(cond, str)	\
-	if (!cond) {	\
+	if (!(cond)) {	\
 		int errno_copy = errno;	\
 		perror(str);	\
 		errno = errno_copy;	\
 	}
 	
 /** 
- * @brief Exits the current thread if the pthread_mutex_lock fails.
+ * @brief Exits the current process if the pthread_mutex_lock fails.
  */
-#define LOCK(l)      if (pthread_mutex_lock(l)!=0)        { \
-    fprintf(stderr, "ERRORE FATALE lock\n");		    \
-    pthread_exit((void*)EXIT_FAILURE);			    \
-  }
+#define LOCK(l) \
+	if (pthread_mutex_lock(l)!=0) { \
+		fprintf(stderr, "ERRORE FATALE lock\n"); \
+		exit(EXIT_FAILURE); \
+  	}
+
 
 /**
- * @brief Exits the current thread if the pthread_mutex_unlock fails.
+ * @brief Exits the current process if the pthread_mutex_unlock fails.
  */   
-#define UNLOCK(l)    if (pthread_mutex_unlock(l)!=0)      { \
-  fprintf(stderr, "ERRORE FATALE unlock\n");		    \
-  pthread_exit((void*)EXIT_FAILURE);				    \
-  }
+#define UNLOCK(l) \
+	if (pthread_mutex_unlock(l)!=0) { \
+		fprintf(stderr, "ERRORE FATALE unlock\n"); \
+		exit(EXIT_FAILURE); \
+	}
+
 
 /**
- * @brief Exits the current thread if the pthread_cond_wait fails.
+ * @brief Exits the current process if the pthread_cond_wait fails.
  */   
-#define WAIT(c,l)    if (pthread_cond_wait(c,l)!=0)       { \
-    fprintf(stderr, "ERRORE FATALE wait\n");		    \
-    pthread_exit((void*)EXIT_FAILURE);				    \
-}
+#define WAIT(c,l) \
+	if (pthread_cond_wait(c,l)!=0) { \
+		fprintf(stderr, "ERRORE FATALE wait\n"); \
+		exit(EXIT_FAILURE); \
+	}
 
-/* ATTENZIONE: t e' un tempo assoluto! */
-/**
- * @brief Exits the current thread if the pthread_cond_timedwait fails.
- */   
-#define TWAIT(c,l,t) {							\
-    int r=0;								\
-    if ((r=pthread_cond_timedwait(c,l,t))!=0 && r!=ETIMEDOUT) {		\
-      fprintf(stderr, "ERRORE FATALE timed wait\n");			\
-      pthread_exit((void*)EXIT_FAILURE);					\
-    }									\
-  }
 
 /**
- * @brief Exits the current thread if the pthread_cond_signal fails.
+ * @brief Exits the current process if the pthread_cond_timedwait fails.
+ * @note WARNING: t is an ABSOLUTE time!
  */   
-#define SIGNAL(c)    if (pthread_cond_signal(c)!=0)       {	\
-    fprintf(stderr, "ERRORE FATALE signal\n");			\
-    pthread_exit((void*)EXIT_FAILURE);					\
-  }
+#define TWAIT(c,l,t) \
+	{ \
+		int r=0; \
+		if ((r=pthread_cond_timedwait(c,l,t))!=0 && r!=ETIMEDOUT) { \
+			fprintf(stderr, "ERRORE FATALE timed wait\n"); \
+			exit(EXIT_FAILURE); \
+		} \
+	}
+
 
 /**
- * @brief Exits the current thread if the pthread_cond_broadcast fails.
+ * @brief Exits the current process if the pthread_cond_signal fails.
  */   
-#define BCAST(c)     if (pthread_cond_broadcast(c)!=0)    {		\
-    fprintf(stderr, "ERRORE FATALE broadcast\n");			\
-    pthread_exit((void*)EXIT_FAILURE);						\
-  }
+#define SIGNAL(c) \
+	if (pthread_cond_signal(c)!=0){ \
+		fprintf(stderr, "ERRORE FATALE signal\n"); \
+		exit(EXIT_FAILURE);	\
+	}
+
+
+/**
+ * @brief Exits the current process if the pthread_cond_broadcast fails.
+ */   
+#define BCAST(c) \
+	if (pthread_cond_broadcast(c)!=0){ \
+		fprintf(stderr, "ERRORE FATALE broadcast\n"); \
+		exit(EXIT_FAILURE); \
+	}
+
   
 /**
- * @brief Exits the current thread if the pthread_mutex_trylock fails.
+ * @brief Exits the current process if the pthread_mutex_trylock fails.
  */   
 static inline int TRYLOCK(pthread_mutex_t* l) {
   int r=0;		
   if ((r=pthread_mutex_trylock(l))!=0 && r!=EBUSY) {		    
     fprintf(stderr, "ERRORE FATALE unlock\n");		    
-    pthread_exit((void*)EXIT_FAILURE);			    
+    exit(EXIT_FAILURE);			    
   }								    
   return r;	
 }

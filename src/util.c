@@ -71,6 +71,21 @@ bool strtoupper(char* out, const char* in, size_t len){
 }
 
 
+/**
+ * @brief Checks whether two strings are equal (in the sense
+ * that contain the same characters).
+ * @return true if condition is verified, false otherwise or
+ * if any of #str1 and #str2 is NULL.
+ */
+bool strequal(char* str1, char* str2){
+	if (!str1 || !str2) return false;
+	size_t n = strlen(str1);
+	size_t m = strlen(str2);
+	if (n != m) return false;
+	return (strncmp(str1, str2, n) == 0);
+}
+
+
 /* ------------------------------------------------------------------------------------ */
 
 /*

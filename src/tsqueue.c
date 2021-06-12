@@ -1,67 +1,92 @@
 #include <tsqueue.h>
 
 
-/**
- * @brief Initializes a tsqueue_t object.
- * @return 0 on success, -1 on error.
-*/
-int tsqueue_init(tsqueue_t* q){
-	SYSCALL_RETURN(pthread_mutex_init(&q->lock, NULL), -1, "While initializing queue mutex");
-	if (pthread_cond_init(&q->putVar, NULL)) { /* i.e., != 0 */
-		pthread_mutex_destroy(&q->lock);
-		return -1;		
-	}
-	if (pthread_cond_init(&q->getVar, NULL)) { 
-		pthread_mutex_destroy(&q->lock);
-		pthread_cond_destroy(&q->putVar);
-		return -1;		
-	}		
-	q->head = NULL;
-	q->tail = NULL;
-	q->size = 0;
-	q->waitPut = 0;
-	q->waitGet = 0;
-	q->activePut = false;
-	q->activeGet = false;
-	q->state = Q_OPEN;
-	return 0;
-}
-
 static size_t tsqueue_size(tsqueue_t* q){
 	size_t res = q->size;
 	return res;
 }
 
 static bool tsqueue_isEmpty(tsqueue_t* q){ 
-	return (q->size == 0);
+	return (tsqueue_size(q) == 0);
 }
 
-static bool putShouldWait(tsqueue_t* q){
-	bool res = (q->activePut || q->activeGet);
+static bool pushShouldWait(tsqueue_t* q){
+	bool res = (q->activePush || q->activePop || q->activeIter);
 	return res;
 }
 
-static bool getShouldWait(tsqueue_t* q){
-	bool res = (tsqueue_isEmpty(q) || q->activePut || q->activeGet);
+static bool popShouldWait(tsqueue_t* q, bool nonblocking){
+	bool res = ((tsqueue_isEmpty(q) && !nonblocking) || q->activePush || q->activePop || q->activeIter);
 	return res;
 }
+
+static bool iterShouldWait(tsqueue_t* q){
+	bool res = (q->activePush || q->activePop || q->activeIter); /* Another iteration */
+	return res;
+}
+
+
+/**
+ * @brief Initializes a tsqueue_t object.
+ * @return Pointer to tsqueue_t object on success, NULL on error.
+*/
+tsqueue_t* tsqueue_init(void){
+	tsqueue_t* q = malloc(sizeof(tsqueue_t));
+	if (!q) return NULL;
+	memset(q, 0, sizeof(*q));
+	if (pthread_mutex_init(&q->lock, NULL) == -1){
+		perror("While initializing queue mutex");
+		return NULL;
+	}
+	if (pthread_cond_init(&q->pushVar, NULL) != 0) {
+		pthread_mutex_destroy(&q->lock);
+		return NULL;	
+	}
+	if (pthread_cond_init(&q->popVar, NULL)) { 
+		pthread_mutex_destroy(&q->lock);
+		pthread_cond_destroy(&q->pushVar);
+		return NULL;	
+	}
+	if (pthread_cond_init(&q->iterVar, NULL)) { 
+		pthread_mutex_destroy(&q->lock);
+		pthread_cond_destroy(&q->pushVar);
+		pthread_cond_destroy(&q->popVar);
+		return NULL;	
+	}
+	q->head = NULL;
+	q->tail = NULL;
+	q->iter = NULL;
+	q->size = 0;
+	q->waitPush = 0;
+	q->waitPop = 0;
+	q->waitIter = 0;
+	q->activePush = false;
+	q->activePop = false;
+	q->activeIter = false;
+	q->state = Q_OPEN;
+	return q;
+}
+
 
 int tsqueue_open(tsqueue_t* q){
 	if (!q) return -1;
 	LOCK(&q->lock);
 	q->state = Q_OPEN;
-	pthread_cond_broadcast(&q->putVar);
-	pthread_cond_broadcast(&q->getVar);
+	pthread_cond_broadcast(&q->pushVar);
+	pthread_cond_broadcast(&q->popVar);
+	pthread_cond_broadcast(&q->iterVar);
 	UNLOCK(&q->lock);
 	return 0;
 }
+
 
 int tsqueue_close(tsqueue_t* q){
 	if (!q) return -1;
 	LOCK(&q->lock);
 	q->state = Q_CLOSED;
-	pthread_cond_broadcast(&q->putVar);
-	pthread_cond_broadcast(&q->getVar);
+	pthread_cond_broadcast(&q->pushVar);
+	pthread_cond_broadcast(&q->popVar);
+	pthread_cond_broadcast(&q->iterVar);
 	UNLOCK(&q->lock);
 	return 0;
 }
@@ -70,51 +95,49 @@ int tsqueue_close(tsqueue_t* q){
 /**
  * @brief Puts the item 'elem' in the queue if it is open and there is NOT any active
  * producer / consumer. If queue is closed, exit immediately.
- * @return 0 on success, -1 on error, 1 if queue is closed.
+ * @return 0 on success, -1 on error, a positive number otherwise made by one or more
+ * QRET_* flags. In particular, flag QRET_CLOSED is ALWAYS available.
 */
-int tsqueue_put(tsqueue_t* q, void* elem){
+int tsqueue_push(tsqueue_t* q, void* elem){
 	if (!q || !elem) return -1;
 	tsqueue_node_t* qn;
 	LOCK(&q->lock);
-	q->waitPut++;
-	while ((q->state == Q_OPEN) && putShouldWait(q)) pthread_cond_wait(&q->putVar, &q->lock);
-	q->waitPut--;
+	q->waitPush++;
+	while ((q->state == Q_OPEN) && pushShouldWait(q)) pthread_cond_wait(&q->pushVar, &q->lock);
+	q->waitPush--;
 	if (q->state == Q_CLOSED){ /* NO more items to insert */
 		UNLOCK(&q->lock);
-		return 1;
+		return QRET_CLOSED;
 	}
-	q->activePut = true;		
+	q->activePush = true;
+	qn = malloc(sizeof(tsqueue_node_t));
+	if (!qn){
+		UNLOCK(&q->lock);
+		return -1;
+	}
+	memset(qn, 0, sizeof(*qn));
 	if (q->size == 0){
-		qn = malloc(sizeof(tsqueue_node_t));
-		memset(qn, 0, sizeof(*qn));
-		if (!qn){
-			UNLOCK(&q->lock);
-			return -1;
-		}
 		q->head = qn;
 		q->head->elem = elem;
 		q->head->next = NULL;
+		q->head->prev = NULL;
 		q->tail = q->head;
-		q->size = 1;
 	} else {
-		qn = malloc(sizeof(tsqueue_node_t));
-		memset(qn, 0, sizeof(*qn));
-		if (!qn){
-			UNLOCK(&q->lock);			
-			return -1;
-		}
 		qn->elem = elem;
+		qn->next = NULL;
+		qn->prev = q->tail;
 		q->tail->next = qn;
 		q->tail = qn;
-		q->size++;
 	}
-	q->activePut = false;
-	/* TODO Modify as a rwlock */
-	if (q->waitGet > 0) pthread_cond_broadcast(&q->getVar);
-	else pthread_cond_broadcast(&q->putVar);
+	q->size++;
+	q->activePush = false;
+	if (q->waitIter > 0) pthread_cond_broadcast(&q->iterVar);
+	else if (q->waitPop > 0) pthread_cond_broadcast(&q->popVar);
+	else pthread_cond_broadcast(&q->pushVar);
 	UNLOCK(&q->lock);
 	return 0;		
 }
+
 
 /**
  * @brief Gets the next item in the queue if it is open and there is NOT
@@ -125,33 +148,212 @@ int tsqueue_put(tsqueue_t* q, void* elem){
  * @param res -- Pointer to extracted item (on success). NOTE: For memory
  * safety, res should NOT point to any previous data (i.e., res == &p, where
  * p : void* is a pointer to anything (otherwise it will be lost).
- * @return 0 on success, -1 on error, 1 if queue is closed.
+ * @return 0 on success, -1 on error, a positive number otherwise made by one or more QRET_* flags (and *res is set to NULL). 
+ * In particular, flag QRET_CLOSED is ALWAYS available, while QRET_EMPTY is available ONLY on a nonblocking operation.
 */
-int tsqueue_get(tsqueue_t* q, void** res){
+int tsqueue_pop(tsqueue_t* q, void** res, bool nonblocking){
 	if (!q) return -1;
+	int retval = 0;
 	LOCK(&q->lock);
-	q->waitGet++;
-	while ((q->state == Q_OPEN) && getShouldWait(q)) pthread_cond_wait(&q->getVar, &q->lock);
-	q->waitGet--;
-	if ((q->state == Q_CLOSED) && (tsqueue_isEmpty(q))){ /* NO more items to consume */
+	q->waitPop++;
+	while ((q->state == Q_OPEN) && popShouldWait(q, nonblocking)) pthread_cond_wait(&q->popVar, &q->lock);
+	q->waitPop--;
+	if (q->state == Q_CLOSED) retval |= QRET_CLOSED;
+	if (tsqueue_isEmpty(q)) retval |= QRET_EMPTY;
+	if (nonblocking && (retval & QRET_EMPTY)){ /* If queue is NOT empty, it does not make sense to return */
 		UNLOCK(&q->lock);
-		return 1;
+		*res = NULL;
+		return retval;
+	} else if (!nonblocking && (retval & QRET_CLOSED) && (retval & QRET_EMPTY) ){ /* NO more items to consume */
+		UNLOCK(&q->lock);
+		*res = NULL;
+		return retval;
 	}
-	q->activeGet = true;
+	q->activePop = true;
 	tsqueue_node_t* qn = q->head;
-	q->head = qn->next;
-	qn->next = NULL;
-	q->size--;
 	*res = qn->elem;
-	qn->elem = NULL;
+	if (q->size == 1){
+		q->head = NULL;
+		q->tail = NULL;
+		q->size = 0;
+	} else {
+		q->head->next->prev = NULL;
+		q->head = q->head->next;
+		q->size--;
+	}
 	free(qn);
-	q->activeGet = false;
+	q->activePop = false;
 	/* TODO Is that okay?? */
-	if (q->waitPut > 0) pthread_cond_broadcast(&q->putVar);
-	else pthread_cond_broadcast(&q->getVar);
+	if (q->waitIter > 0) pthread_cond_broadcast(&q->iterVar);
+	else if (q->waitPush > 0) pthread_cond_broadcast(&q->pushVar);
+	else pthread_cond_broadcast(&q->popVar);
 	UNLOCK(&q->lock);
 	return 0;
 }
+
+
+/**
+ * @brief Returns a copy of the first N bytes of the first
+ * element in the queue.
+ * NOTE: This function works even if the queue is closed.
+ * @param copyFun -- Function used to copy the element in the
+ * queue (default memcpy).
+ * @return Pointer to heap-allocated copy of the first element,
+ * NULL on error or if the queue is empty.
+ */
+void* tsqueue_getHead(tsqueue_t* q, void*(*copyFun)(void* restrict, void* restrict, size_t), size_t N){
+	if (!q) return NULL;
+	LOCK(&q->lock);
+	if (tsqueue_isEmpty(q)) return NULL;
+	if (!copyFun){
+		size_t n = strlen(q->head->elem) + 1;
+		if (N > 0) N = MIN(N,n);
+		copyFun = memcpy;
+	} else if (N == 0) return NULL; /* No correct copy is possible */
+	void* p = malloc(N);
+	if (!p) return NULL;
+	copyFun((char*)p, (char*)(q->head->elem), N);
+	UNLOCK(&q->lock);
+	return p;
+}
+
+
+/**
+ * @brief Returns current size of the queue q.
+ * @param s -- Pointer to size_t variabile in which
+ * the result will be written.
+ * @return 0 on success, -1 on error.
+ */
+int tsqueue_getSize(tsqueue_t* q, size_t* s){
+	if (!q) return -1;
+	LOCK(&q->lock);
+	*s = q->size;
+	UNLOCK(&q->lock);
+	return 0;
+}
+
+/**
+ * @brief Initializes thread-safe iteration on queue (with possibility to remove elements).
+ * @return 0 on success, -1 on error.
+ * @note On error, queue is unmodified.
+ * @note Iteration is done WITHOUT holding lock: the thread marks itself as active iterator
+ * and after having finished, it must call tsqueue_iter_end.
+ * @note Iteration is NOT affected by the state of the queue: if the queue is closed and empty,
+ * iteration will simply give no elements.
+ */
+int tsqueue_iter_init(tsqueue_t* q){
+	if (!q) return -1;
+	
+	LOCK(&q->lock);
+	q->waitIter++;
+	while (iterShouldWait(q)) pthread_cond_wait(&q->iterVar, &q->lock);
+	q->waitIter--;
+	q->activeIter = true;
+	q->iter = q->head; /* Starts iteration */
+	UNLOCK(&q->lock);
+	
+	return 0;
+}
+
+
+/** 
+ * @brief Ends iteration on queue.
+ * @return 0 on success, -1 on error.
+ * @note On error, queue is unmodified.
+ */
+int	tsqueue_iter_end(tsqueue_t* q){
+	if (!q) return -1;
+	
+	LOCK(&q->lock);
+	q->activeIter = false;
+	/* TODO Is that okay?? */
+	if (q->waitIter > 0) pthread_cond_broadcast(&q->iterVar);
+	else {
+		pthread_cond_broadcast(&q->popVar);
+		pthread_cond_broadcast(&q->pushVar);
+	}
+	q->iter = NULL; /* For security */
+	UNLOCK(&q->lock);
+	
+	return 0;
+}
+
+
+/** 
+ * @brief Puts next element of the queue into the object pointed by #elem
+ * and sets q->iter to the next node.
+ * @return 0 on success, -1 on error, 1 if there is no next element or the
+ * queue is empty.
+ * @note On error, queue is unmodified.
+ */
+int	tsqueue_iter_next(tsqueue_t* q, void** elem){
+	if (!q || !elem) return -1;
+	
+	LOCK(&q->lock);
+	if (!q->activeIter){
+		UNLOCK(&q->lock);
+		return -1;
+	}	
+	if (!q->iter){ /* Iteration ended (or empty queue) */
+		UNLOCK(&q->lock);
+		return 1;
+	}
+	*elem = q->iter->elem;
+	q->iter = q->iter->next;
+	UNLOCK(&q->lock);
+
+	return 0;
+}
+
+
+/**
+ * @brief Removes element during iteration.
+ * @return 0 on success, -1 on error.
+ * @note On error, queue is unmodified.
+ */
+int	tsqueue_iter_remove(tsqueue_t* q, void** elem){
+	if (!q || !elem){ errno = EINVAL; return -1; }
+
+	LOCK(&q->lock);
+	if (!q->activeIter){
+		UNLOCK(&q->lock);
+		return -1;
+	}
+	if (!q->iter || (q->size == 0)) return 1; /* Iteration ended or empty queue */
+	else if ((q->iter == q->head) || (q->size == 1)){
+		tsqueue_node_t* qn = q->head;
+		*elem = qn->elem;
+		q->head = qn->next;
+		qn->next = NULL;
+		q->size--;
+		qn->elem = NULL;
+		free(qn);
+		/* If queue is now empty, q->iter == NULL and iteration will stop,
+		otherwise it will continue through the next element */
+		q->iter = q->head;
+	/* q->size >= 2 and iter does NOT point to the first element */
+	} else if (q->iter == q->tail){
+		*elem = q->iter->elem;
+		q->iter->prev->next = NULL; /* size >= 2 => this is defined */
+		q->tail = q->iter->prev;
+		q->iter->prev = NULL;
+		free(q->iter);
+		q->size--;
+		q->iter = NULL; /* Iteration ended */
+	} else { /* q->size >= 2 && iter != q->head/l->tail */
+		*elem = q->iter->elem;
+		q->iter->prev->next = q->iter->next;
+		q->iter->next->prev = q->iter->prev;
+		tsqueue_node_t* aux = q->iter->next;
+		free(q->iter);
+		q->size--;
+		q->iter = aux; /* Continues iteration */
+	}
+	UNLOCK(&q->lock);
+
+	return 0;
+}
+
 
 /**
  * @brief Removes all items in the queue and closes it,
@@ -184,64 +386,27 @@ int tsqueue_flush(tsqueue_t* q, void(*freeItems)(void*)){
 		}
 	}
 	q->state = Q_CLOSED;
-		
-	pthread_cond_broadcast(&q->putVar);
-	pthread_cond_broadcast(&q->getVar);
+	
+	pthread_cond_broadcast(&q->pushVar);
+	pthread_cond_broadcast(&q->popVar);
+	pthread_cond_broadcast(&q->iterVar);
 	UNLOCK(&q->lock);
 	
 	return 0;
 }
 
+//FIXME Aggiustare!
 /**
- * @brief Returns a copy of the first N bytes of the first
- * element in the queue.
- * NOTE: This function works even if the queue is closed.
- * @param copyFun -- Function used to copy the element in the
- * queue (default memcpy).
- * @return Pointer to heap-allocated copy of the first element,
- * NULL on error or if the queue is empty.
- */
-void* tsqueue_getHead(tsqueue_t* q, void*(*copyFun)(void* restrict, void* restrict, size_t), size_t N){
-	if (!q) return NULL;
-	LOCK(&q->lock);
-	if (tsqueue_isEmpty(q)) return NULL;
-	if (!copyFun){
-		size_t n = strlen(q->head->elem) + 1;
-		if (N > 0) N = MIN(N,n);
-		copyFun = memcpy;
-	} else if (N == 0) return NULL; /* No correct copy is possible */
-	void* p = malloc(N);
-	if (!p) return NULL;
-	copyFun((char*)p, (char*)(q->head->elem), N);
-	UNLOCK(&q->lock);
-	return p;
-}
-
-/**
- * @brief Returns current size of the queue q.
- * @param s -- Pointer to size_t variabile in which
- * the result will be written.
+ * @brief Destroys queue q by destroying all its mutexes and condVar and freeing queue itself if necessary.
  * @return 0 on success, -1 on error.
+ * @note On error, queue is unmodified.
  */
-int tsqueue_getSize(tsqueue_t* q, size_t* s){
-	if (!q) return -1;
-	LOCK(&q->lock);
-	*s = q->size;
-	UNLOCK(&q->lock);
-	return 0;
-}
-
-/**
- * @brief Destroys queue q by destroying all its mutexes and condVar
- * and freeing queue itself if necessary.
- * @param freeQ -- Pointer to function to use to free the queue
- * (default none).
- * @return 0 on success, -1 on error.
- */
-int tsqueue_destroy(tsqueue_t* q, void(*freeQ)(void*)){
+int tsqueue_destroy(tsqueue_t* q, void(*freeItems)(void*)){
+	SYSCALL_RETURN(tsqueue_flush(q, freeItems), -1, "tsqueue_destroy:error while flushing queue");
 	pthread_mutex_destroy(&q->lock);
-	pthread_cond_destroy(&q->putVar);
-	pthread_cond_destroy(&q->getVar);
-	if (freeQ){ freeQ(q); }
+	pthread_cond_destroy(&q->pushVar);
+	pthread_cond_destroy(&q->popVar);
+	pthread_cond_destroy(&q->iterVar);
+	free(q);
 	return 0;
 }

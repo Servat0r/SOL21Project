@@ -23,7 +23,8 @@
 bool 
 	isUseless(char*),
 	isPath(char*),
-	strtoupper(char*, const char*, size_t);
+	strtoupper(char*, const char*, size_t),
+	strequal(char*, char*);
 	
 int
 	readn(long, void*, size_t),

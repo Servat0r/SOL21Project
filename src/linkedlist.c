@@ -1,10 +1,8 @@
 #include <linkedlist.h>
 
 /**
- * @brief Initializes a LinkedList object
- * as an empty list.
- * @return A LinkedList object on success,
- * NULL on error.
+ * @brief Initializes a LinkedList object as an empty list.
+ * @return A LinkedList object on success, NULL on error.
  */
 llist_t* llist_init(void){
 	llist_t* l = malloc(sizeof(llist_t));
@@ -22,9 +20,12 @@ llist_t* llist_init(void){
  * @param datum -- Pointer to element to be added,
  * later available with {node}->datum.
  * @return 0 on success, -1 on error.
+ * @note On error, list and data are unmodified.
+ * Possible errors are:
+ *	- ENOMEM: unable to allocate memory.
  */
 int	llist_push(llist_t* l, void* datum){
-	if (!l) return -1;
+	if (!l){ errno = EINVAL; return -1; }
 	llistnode_t* ln = malloc(sizeof(llistnode_t));
 	if (!ln) return -1;	
 	ln->datum = datum;
@@ -46,13 +47,12 @@ int	llist_push(llist_t* l, void* datum){
 
 /**
  * @brief Removes first element from LinkedList.
- * @param out -- Pointer in which to save the
- * removed element.
- * @return 0 on success, -1 on error, 1 if list
- * is empty.
+ * @param out -- Pointer in which to save the removed element.
+ * @return 0 on success, -1 on error, 1 if list is empty.
+ * @note On error, list and data are unmodified.
  */
 int	llist_pop(llist_t* l, void** out){
-	if (!l || !out) return -1;
+	if (!l || !out){ errno = EINVAL; return -1; }
 	if (l->size == 0) return 1;
 	*out = l->head->datum;
 	llistnode_t* aux = l->head;
@@ -61,14 +61,13 @@ int	llist_pop(llist_t* l, void** out){
 		l->head = NULL;
 		l->tail = NULL;
 		l->size = 0;
-		return 0;
 	} else {
 		l->head->next->prev = NULL;
 		l->head = l->head->next;
 		free(aux);
 		l->size--;
-		return 0;
 	}
+	return 0;
 }
 
 
@@ -78,9 +77,10 @@ int	llist_pop(llist_t* l, void** out){
  * be between 0 on l->size includes (in the latter
  * case, this is equivalent to llist_push).
  * @return 0 on success, -1 on error.
+ * @note On error, list and data are unmodified.
  */
 int	llist_insert(llist_t* l, int index, void* datum){
-	if (!l || (index < 0) || (index > l->size)) return -1;
+	if (!l || (index < 0) || (index > l->size)){ errno = EINVAL; return -1; }
 	if (index == l->size) return llist_push(l, datum);
 	llistnode_t* ln = malloc(sizeof(llistnode_t));
 	if (!ln) return -1;
@@ -108,9 +108,10 @@ int	llist_insert(llist_t* l, int index, void* datum){
  * index must be between 0 and l->size - 1.
  * @param out -- Pointer in which to save the removed element.
  * @return 0 on success, -1 on error, 1 if list is empty.
+ * @note On error, list and data are unmodified.
  */
 int	llist_remove(llist_t* l, int index, void** out){
-	if (!l || !out || (index < 0) || (index >= l->size)) return -1;
+	if (!l || !out || (index < 0) || (index >= l->size)){ errno = EINVAL; return -1; }
 	if ((index == 0) || (l->size == 1)) return llist_pop(l, out);
 	if (l->size == 0) return 1;
 	else {
@@ -126,65 +127,25 @@ int	llist_remove(llist_t* l, int index, void** out){
 }
 
 
-
-/**
- * @brief Removes the current node pointed by node during
- * a llist_modif_foreach iteration. If list is empty, nothing
- * is done, otherwise after removal:
- *	- if list contained only 1 element or *node points to the
- * 	first one, *node is set to NULL (stopping iteration in the 
- *	next step);
- *	- otherwise, *node is set to the previous element in order
- * to correctly point to the next one in the list after end of
- * current foreach iteration.
- * @return 0 on success, -1 on error.
- * Possible errors are:
- *	- EINVAL: invalid arguments l or out (a NULL node is
- *	considered "end-of-list").
- */
-int	llist_iter_remove(llist_t* l, llistnode_t** node, void** out){
-	if (!l || !out) return -1;
-	if (!node) return 0; /* Iteration ended */
-	if (l->size == 0) return 0;
-	else if ((*node == l->head) || (l->size == 1)){
-		int ret = llist_pop(l, out);
-		*node = NULL;
-		return ret;
-	} else if (*node == l->tail){
-		*out = (*node)->datum;
-		(*node)->prev->next = NULL; /* size >= 2 => this is defined */
-		l->tail = (*node)->prev;
-		free(*node);
-		l->size--;
-		*node = l->tail; /* Iteration ended */
-	} else { /* l->size >= 2 && node != l->head/l->tail */
-		*out = (*node)->datum;
-		(*node)->prev->next = (*node)->next;
-		(*node)->next->prev = (*node)->prev;
-		llistnode_t* aux = (*node)->prev;
-		free(*node);
-		l->size--;
-		*node = aux; /* Continues iteration */
-	}
-	return 0;
-}
-
-
 /**
  * @brief Destroys list #l by freeing itself and all its
  * elements.
  * @param freeItems -- Pointer to function for deleting
  * elements in the list (default is free).
  * @return 0 on success, -1 on error.
+ * @note On error, list could be partially filled: if so,
+ * freeItems has been applied ONLY on data within removed
+ * nodes, and data of the node that has caused failure is
+ * untouched.
  */
 int	llist_destroy(llist_t* l, void(*freeItems)(void*)){
-	if (!l) return -1;
+	if (!l){ errno = EINVAL; return -1; }
 	if (!freeItems) freeItems = free;
 	if (l->size > 0){
 		int n = l->size;
 		void* datum;
 		for (int i = 0; i < n; i++){
-			llist_pop(l, &datum);
+			SYSCALL_RETURN(llist_pop(l, &datum), -1, "llist_destroy: when extracting item");
 			freeItems(datum);
 		}
 	}
@@ -197,9 +158,10 @@ int	llist_destroy(llist_t* l, void(*freeItems)(void*)){
  * @brief Dumps basic info of the list to the file
  * pointed by #stream.
  * @return 0 on success, -1 on error.
+ * @note On error, list and data are unmodified.
  */
 int	llist_dump(llist_t* l, FILE* stream){
-	if (!l || !stream) return -1;
+	if (!l || !stream){ errno = EINVAL; return -1; }
 	fprintf(stream, "llist_dump: start\n");
 	fprintf(stream, "llist_dump: size = %d\n", l->size);
 	llistnode_t* node;

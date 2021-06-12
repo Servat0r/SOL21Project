@@ -6,6 +6,7 @@
 #include <argparser.h>
 
 
+
 /**
  * @brief Dummy function for a no-arguments option.
  * @return true if args is an empty linkedlist, false
@@ -236,17 +237,17 @@ int parseOption(int argc, char* argv[], const optdef_t options[], const int optl
 		if (argv[ret] == NULL) break; /* End of array */
 		currArgs = splitArgs(argv[ret] + *offset);
 		if (!currArgs) return -1; /* E' responsabilità del chiamante liberare la linkedlist 'args' se necessario */
-		llist_modif_foreach(currArgs, &node){
+		llist_foreach(currArgs, node){
 			k = matchOption(node->datum, options, optlen);
 			if ((k >= 0) && (k < optlen)) break; /* Option matched -> end of argument scanning */
 			else k = optlen;
 			j++;
 			*offset += strlen(node->datum) + 1; /* To count also commas */
-			char* out;
-			llist_iter_remove(currArgs, &node, &out);
+			char* out = node->datum;
+			node->datum = NULL;
 			llist_push(args, out);
 		}
-		llist_destroy(currArgs, free);
+		llist_destroy(currArgs, free); //free
 		if (k < optlen) break;
 		if (*offset >= strlen(argv[ret])){
 			*offset = 0;
