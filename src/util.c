@@ -1,6 +1,12 @@
 #include <util.h>
 
 /**
+ * @brief Dummy function for when there is nothing to free.
+ */
+void dummy(void* arg) { return ; }
+
+
+/**
  * @brief Checks if the string is 'useless' (i.e., a series of C space characters). 
  * @return true if the string is useless, false otherwise.
  */

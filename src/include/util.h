@@ -27,6 +27,7 @@ bool
 	strequal(char*, char*),
 	isNumber(char* str),
 	isFPNumber(char* str);
+
 	
 int
 	readn(long, void*, size_t),
@@ -34,6 +35,9 @@ int
 	getInt(char* str, long* val),
 	getFloat(char* str, float* val);
 
+
+void
+	dummy(void* arg);
 	
 /**
  * @brief Utility procedure for printing errors.

@@ -24,6 +24,7 @@
 #define _FSS_H
 
 #include <defines.h>
+#include <util.h>
 #include <icl_hash.h>
 #include <linkedlist.h>
 #include <fdata.h>

@@ -7,6 +7,7 @@
 #define _FDATA_H
 
 #include <defines.h>
+#include <util.h>
 #include <fflags.h> /* Global flags for current file (not considering O_CREATE and O_LOCK, which are exported also to client) */
 #include <tsqueue.h>
 #include <linkedlist.h>

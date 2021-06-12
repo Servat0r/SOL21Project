@@ -27,10 +27,6 @@
 #define MAX(X, Y) ( (X) >= (Y) ? (X) : (Y));
 #define MIN(X, Y) ( (X) <= (Y) ? (X) : (Y));
 
-/**
- * @brief Dummy function for when there is nothing to free.
- */
-static void dummy(void* arg) { return ; }
 
 /* *********** SYSTEM CALLS ERRORS HANDLING MACROS *********** */
 
