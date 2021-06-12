@@ -55,10 +55,7 @@ typedef struct fss_s {
 	int state; /* actives[i] == #{threads attivi su un'operazione di tipo i} */
 	
 	pthread_mutex_t wlock; /* Lock per far accedere gli scrittori uno alla volta */
-	
-	int lock_waiters; //FIXME Togliere
-	pthread_cond_t lock_cond; //FIXME Togliere
-	
+		
 	int maxFileNo; /* Maximum number of storable files */
 
 	size_t storageCap; /* Storage capacity in KBytes */
@@ -116,8 +113,6 @@ int
 	fss_rop_end(fss_t* fss),
 	fss_wop_init(fss_t* fss),
 	fss_wop_end(fss_t* fss),
-	fss_wait(fss_t* fss), //TODO Eliminare
-	fss_wakeup_end(fss_t* fss), //TODO Eliminare
 	fss_op_chmod(fss_t* fss),
 	
 	/* Locking / Unlocking */

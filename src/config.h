@@ -7,7 +7,6 @@
 #define _CONFIG_H
 
 #include <defines.h>
-#include <numfuncs.h>
 #include <icl_hash.h>
 #include <util.h>
 #include <limits.h>
@@ -132,8 +131,8 @@ int config_parsedict(config_t* config, icl_hash_t* dict){
 		NUM_SETATTR(name, "FileStorageBuckets", datum, config->fileStorageBuckets)
 	}
 	/* Extract string values from the hashtable before destroying it*/
-	if (config->socketPath) icl_hash_delete(dict, "SocketPath", free, dummy);
-	if (config->logFilePath) icl_hash_delete(dict, "LogFilePath", free, dummy);
+	if (config->socketPath) { SYSCALL_EXIT(icl_hash_delete(dict, "SocketPath", free, dummy), "config_parsedict: while extracting socket path"); }
+	if (config->logFilePath) { SYSCALL_EXIT(icl_hash_delete(dict, "LogFilePath", free, dummy), "config_parsedict: while extracting logfile path"); }
 	
 	return 0;
 }

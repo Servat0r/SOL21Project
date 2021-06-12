@@ -17,14 +17,13 @@
 #include <ctype.h>
 
 #define GBVALUE 1048576 /* #KBs in 1 GB */
-#define MBVALUE 1024 /* #MBs in 1 MB */
+#define MBVALUE 1024 /* #KBs in 1 MB */
+#define KBVALUE 1024 /* Bytes in 1 KB */
 #define MAXPATHSIZE pathconf("/", _PC_PATH_MAX) /* Maximum length of pathname (not socket) */
 #define ATOMPIPEBUF(pfd) pathconf(pfd, _PC_PIPE_BUF) /* Maximum size of an atomic read/write on a pipe (pfd is one fd of a pipe) */
 #define UNIX_PATH_MAX 108 /* Maximum length of socket name */
 #define MAXBUFSIZE 4096 /* Maximum length of read/write buffers */
-#define EOS "\0" /* End of client-stream */
 #define CHSIZE sizeof(char) /* For using with integers to cast to size_t */
-
 #define MAX(X, Y) ( (X) >= (Y) ? (X) : (Y));
 #define MIN(X, Y) ( (X) <= (Y) ? (X) : (Y));
 
@@ -33,27 +32,32 @@
  */
 static void dummy(void* arg) { return ; }
 
+/* *********** SYSTEM CALLS ERRORS HANDLING MACROS *********** */
 
 /** @brief Checks whether a system call fails and if yes, prints the
  * corresponding error and exits.
 */
 #define SYSCALL_EXIT(sc, str)	\
-    if ((sc) == -1) {				\
-	int errno_copy = errno;			\
-	perror(str);				\
-	exit(errno_copy);			\
-    }
+	do { \
+		if ((sc) == -1) {				\
+			int errno_copy = errno;			\
+			perror(str);				\
+			exit(errno_copy);			\
+		} \
+    } while(0);
 
 
 /** @brief Checks whether a system call fails and if yes, prints the
  * corresponding error and sets errno to that, but WITHOUT exiting.
 */
 #define SYSCALL_PRINT(sc, str)	\
-    if ((sc) == -1) {				\
-	int errno_copy = errno;			\
-	perror(str);				\
-	errno = errno_copy;			\
-    }
+	do { \
+		if ((sc) == -1) {				\
+			int errno_copy = errno;			\
+			perror(str);				\
+			errno = errno_copy;			\
+		} \
+    } while(0);
 
 
 /**
@@ -61,12 +65,14 @@ static void dummy(void* arg) { return ; }
  * of exiting.
  */
 #define SYSCALL_RETURN(sc, ret, str)	\
-	if ((sc) == -1) {	\
-		int errno_copy = errno;	\
-		perror(str);								\
-		errno = errno_copy;							\
-		return (ret);									\
-	}
+	do { \
+		if ((sc) == -1) {	\
+			int errno_copy = errno;	\
+			perror(str);								\
+			errno = errno_copy;							\
+			return (ret);									\
+		} \
+	} while(0);
 
 
 /**
@@ -74,97 +80,294 @@ static void dummy(void* arg) { return ; }
  * specified as second argument.
  */
 #define CHECK_COND_EXEC(cond, str, cmd) \
-	if (!(cond)) { \
-		perror(str); \
-		code \
-	}
+	do { \
+		if (!(cond)) { \
+			perror(str); \
+			cmd \
+		} \
+	} while(0);
 
 
 /**
  * @brief As CHECK_COND_EXEC, but it prints out the errno message and exits. 
  */
 #define CHECK_COND_EXIT(cond, str)	\
-    if (!(cond)) {				\
-	int errno_copy = errno;			\
-	perror(str); \
-	exit(errno_copy);			\
-    }
+	do { \
+		if (!(cond)) {				\
+		int errno_copy = errno;			\
+		perror(str); \
+		exit(errno_copy);			\
+		} \
+    } while(0);
 
 
 /**
  * @brief As CHECK_COND_PRINT, but it only prints the errno message.
  */
 #define CHECK_COND_PRINT(cond, str)	\
-	if (!(cond)) {	\
-		int errno_copy = errno;	\
-		perror(str);	\
-		errno = errno_copy;	\
-	}
-	
+	do { \
+		if (!(cond)) {	\
+			int errno_copy = errno;	\
+			perror(str);	\
+			errno = errno_copy;	\
+		} \
+	} while(0);
+
+
+/* ********** MUTEX FUNCTIONS ERRORS HANDLING MACROS ********** */
+
+/**
+ * @brief Exits the current process if the pthread_mutex_init fails.
+ */   
+#define MTX_INIT(l, attr) \
+	do { \
+		if (pthread_mutex_init((l), (attr)) != 0){ \
+			fprintf(stderr, "FATAL ERROR on mutex initialization\n"); \
+			exit(EXIT_FAILURE); \
+		} \
+	} while(0);
+
+
+/**
+ * @brief Exits the current process if the pthread_mutex_destroy fails.
+ */   
+#define MTX_DESTROY(l) \
+	do { \
+		if (pthread_mutex_destroy(l) != 0){ \
+			fprintf(stderr, "FATAL ERROR on mutex destruction\n"); \
+			exit(EXIT_FAILURE); \
+		} \
+	} while(0);
+
+
 /** 
  * @brief Exits the current process if the pthread_mutex_lock fails.
  */
 #define LOCK(l) \
-	if (pthread_mutex_lock(l)!=0) { \
-		fprintf(stderr, "ERRORE FATALE lock\n"); \
-		exit(EXIT_FAILURE); \
-  	}
+	do { \
+		if (pthread_mutex_lock(l)!=0) { \
+			fprintf(stderr, "ERRORE FATALE lock\n"); \
+			exit(EXIT_FAILURE); \
+	  	} \
+  	} while(0);
 
 
 /**
  * @brief Exits the current process if the pthread_mutex_unlock fails.
  */   
 #define UNLOCK(l) \
-	if (pthread_mutex_unlock(l)!=0) { \
-		fprintf(stderr, "ERRORE FATALE unlock\n"); \
-		exit(EXIT_FAILURE); \
-	}
+	do { \
+		if (pthread_mutex_unlock(l)!=0) { \
+			fprintf(stderr, "ERRORE FATALE unlock\n"); \
+			exit(EXIT_FAILURE); \
+		} \
+	} while(0);
+
+
+/* ********** CONDVARS FUNCTIONS ERRORS HANDLING MACROS ********** */
+
+
+/**
+ * @brief Exits the current process if the pthread_cond_init fails.
+ */   
+#define CD_INIT(cond, attr) \
+	do { \
+		if (pthread_cond_init((cond), (attr)) != 0){ \
+			fprintf(stderr, "FATAL ERROR condition variable initialization\n"); \
+			exit(EXIT_FAILURE); \
+		} \
+	} while(0);
+
+
+/**
+ * @brief Exits the current process if the pthread_cond_destroy fails.
+ */   
+#define CD_DESTROY(cond) \
+	do { \
+		if (pthread_cond_destroy(cond) != 0){ \
+			fprintf(stderr, "FATAL ERROR condition variable destruction\n"); \
+			exit(EXIT_FAILURE); \
+		} \
+	} while(0);
 
 
 /**
  * @brief Exits the current process if the pthread_cond_wait fails.
  */   
 #define WAIT(c,l) \
-	if (pthread_cond_wait(c,l)!=0) { \
-		fprintf(stderr, "ERRORE FATALE wait\n"); \
-		exit(EXIT_FAILURE); \
-	}
+	do { \
+		if (pthread_cond_wait(c,l)!=0) { \
+			fprintf(stderr, "ERRORE FATALE wait\n"); \
+			exit(EXIT_FAILURE); \
+		} \
+	} while(0);
 
 
 /**
  * @brief Exits the current process if the pthread_cond_timedwait fails.
  * @note WARNING: t is an ABSOLUTE time!
  */   
-#define TWAIT(c,l,t) \
-	{ \
+#define TMDWAIT(c,l,t) \
+	do { \
 		int r=0; \
 		if ((r=pthread_cond_timedwait(c,l,t))!=0 && r!=ETIMEDOUT) { \
 			fprintf(stderr, "ERRORE FATALE timed wait\n"); \
 			exit(EXIT_FAILURE); \
 		} \
-	}
+	} while(0);
 
 
 /**
  * @brief Exits the current process if the pthread_cond_signal fails.
  */   
 #define SIGNAL(c) \
-	if (pthread_cond_signal(c)!=0){ \
-		fprintf(stderr, "ERRORE FATALE signal\n"); \
-		exit(EXIT_FAILURE);	\
-	}
+	do { \
+		if (pthread_cond_signal(c)!=0){ \
+			fprintf(stderr, "ERRORE FATALE signal\n"); \
+			exit(EXIT_FAILURE);	\
+		} \
+	} while(0);
 
 
 /**
  * @brief Exits the current process if the pthread_cond_broadcast fails.
  */   
 #define BCAST(c) \
-	if (pthread_cond_broadcast(c)!=0){ \
-		fprintf(stderr, "ERRORE FATALE broadcast\n"); \
-		exit(EXIT_FAILURE); \
-	}
+	do { \
+		if (pthread_cond_broadcast(c)!=0){ \
+			fprintf(stderr, "ERRORE FATALE broadcast\n"); \
+			exit(EXIT_FAILURE); \
+		} \
+	} while(0);
 
-  
+
+/* ********** RWLOCK FUNCTIONS ERRORS HANDLING MACROS ********** */
+
+/**
+ * @brief Exits the current process if the pthread_rwlock_init fails.
+ */   
+#define RWL_INIT(l, attr) \
+	do { \
+		if (pthread_rwlock_init((l), (attr)) != 0){ \
+			fprintf(stderr, "FATAL ERROR on rwlock initialization\n"); \
+			exit(EXIT_FAILURE); \
+		} \
+	} while(0);
+
+
+/**
+ * @brief Exits the current process if the pthread_rwlock_destroy fails.
+ */   
+#define RWL_DESTROY(l) \
+	do { \
+		if (pthread_rwlock_destroy(l) != 0){ \
+			fprintf(stderr, "FATAL ERROR on rwlock destruction\n"); \
+			exit(EXIT_FAILURE); \
+		} \
+	} while(0);
+
+
+/**
+ * @brief Exits the current process if the pthread_rwlock_rdlock fails.
+ */   
+#define RWL_RDLOCK(l) \
+	do { \
+		if (pthread_rwlock_rdlock(l) != 0){ \
+			fprintf(stderr, "FATAL ERROR on rwlock read-locking\n"); \
+			exit(EXIT_FAILURE); \
+		} \
+	} while(0);
+
+
+/**
+ * @brief Exits the current process if the pthread_rwlock_wrlock fails.
+ */   
+#define RWL_WRLOCK(l) \
+	do { \
+		if (pthread_rwlock_wrlock(l) != 0){ \
+			fprintf(stderr, "FATAL ERROR on rwlock write-locking\n"); \
+			exit(EXIT_FAILURE); \
+		} \
+	} while(0);
+
+
+/**
+ * @brief Exits the current process if the pthread_rwlock_unlock fails.
+ */   
+#define RWL_UNLOCK(l) \
+	do { \
+		if (pthread_rwlock_unlock(l) != 0){ \
+			fprintf(stderr, "FATAL ERROR on rwlock unlocking\n"); \
+			exit(EXIT_FAILURE); \
+		} \
+	} while(0);
+
+
+/* ********** DYNAMIC MEMORY ALLOCATION ERRORS HANDLING MACROS ********** */
+
+/**
+ * @brief Exits the current process if malloc fails, and if succeeds
+ * it does NOT initialize allocated memory.
+ */
+#define MALLOC(ptr, size) \
+	do { \
+		if ( !(ptr = malloc(size)) ){ \
+			fprintf(stderr, "FATAL ERROR on malloc\n"); \
+			exit(EXIT_FAILURE); \
+		} \
+	} while(0);
+
+
+/**
+ * @brief Exits the current process if malloc fails, and if succeeds
+ * it initializes allocated memory to mset with a memset.
+ */
+#define MALLOC_MSET(ptr, size, mset) \
+	do { \
+		if ( !(ptr = malloc(size)) ){ \
+			fprintf(stderr, "FATAL ERROR on malloc\n"); \
+			exit(EXIT_FAILURE); \
+		} \
+		memset(ptr, mset, size); \
+	} while(0);
+
+
+/**
+ * @brief Exits the current process if calloc fails.
+ */
+#define CALLOC(ptr, nmemb, size) \
+	do { \
+		if ( !(ptr = calloc((nmemb), (size))) ) { \
+			fprintf(stderr, "FATAL ERROR on calloc\n"); \
+			exit(EXIT_FAILURE); \
+		} \
+	} while(0);
+
+
+/**
+ * @brief Exits the current process if realloc fails.
+ */
+#define REALLOC(dest, src, size) \
+	do { \
+		if ( !(dest = realloc((src), (size))) ) { \
+			fprintf(stderr, "FATAL ERROR on realloc\n"); \
+			exit(EXIT_FAILURE); \
+		} \
+	} while(0);
+
+
+/**
+ * @brief Exits the current process if reallocarray fails.
+ */
+#define REALLOCARRAY(dest, src, nmemb, size) \
+	do { \
+		if ( !(dest = reallocarray((src), (nmemb), (size))) ) { \
+			fprintf(stderr, "FATAL ERROR on reallocarray\n"); \
+			exit(EXIT_FAILURE); \
+		} \
+	} while(0);
+
+
 /**
  * @brief Exits the current process if the pthread_mutex_trylock fails.
  */   

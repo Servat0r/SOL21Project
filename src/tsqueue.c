@@ -31,28 +31,14 @@ static bool iterShouldWait(tsqueue_t* q){
  * @return Pointer to tsqueue_t object on success, NULL on error.
 */
 tsqueue_t* tsqueue_init(void){
-	tsqueue_t* q = malloc(sizeof(tsqueue_t));
-	if (!q) return NULL;
-	memset(q, 0, sizeof(*q));
-	if (pthread_mutex_init(&q->lock, NULL) == -1){
-		perror("While initializing queue mutex");
-		return NULL;
-	}
-	if (pthread_cond_init(&q->pushVar, NULL) != 0) {
-		pthread_mutex_destroy(&q->lock);
-		return NULL;	
-	}
-	if (pthread_cond_init(&q->popVar, NULL)) { 
-		pthread_mutex_destroy(&q->lock);
-		pthread_cond_destroy(&q->pushVar);
-		return NULL;	
-	}
-	if (pthread_cond_init(&q->iterVar, NULL)) { 
-		pthread_mutex_destroy(&q->lock);
-		pthread_cond_destroy(&q->pushVar);
-		pthread_cond_destroy(&q->popVar);
-		return NULL;	
-	}
+	tsqueue_t* q;
+
+	MALLOC_MSET(q, sizeof(tsqueue_t), 0);
+	MTX_INIT(&q->lock, NULL);
+	CD_INIT(&q->pushVar, NULL);
+	CD_INIT(&q->popVar, NULL);
+	CD_INIT(&q->iterVar, NULL);
+
 	q->head = NULL;
 	q->tail = NULL;
 	q->iter = NULL;
@@ -72,9 +58,9 @@ int tsqueue_open(tsqueue_t* q){
 	if (!q) return -1;
 	LOCK(&q->lock);
 	q->state = Q_OPEN;
-	pthread_cond_broadcast(&q->pushVar);
-	pthread_cond_broadcast(&q->popVar);
-	pthread_cond_broadcast(&q->iterVar);
+	BCAST(&q->pushVar);
+	BCAST(&q->popVar);
+	BCAST(&q->iterVar);
 	UNLOCK(&q->lock);
 	return 0;
 }
@@ -84,9 +70,9 @@ int tsqueue_close(tsqueue_t* q){
 	if (!q) return -1;
 	LOCK(&q->lock);
 	q->state = Q_CLOSED;
-	pthread_cond_broadcast(&q->pushVar);
-	pthread_cond_broadcast(&q->popVar);
-	pthread_cond_broadcast(&q->iterVar);
+	BCAST(&q->pushVar);
+	BCAST(&q->popVar);
+	BCAST(&q->iterVar);
 	UNLOCK(&q->lock);
 	return 0;
 }
@@ -103,7 +89,7 @@ int tsqueue_push(tsqueue_t* q, void* elem){
 	tsqueue_node_t* qn;
 	LOCK(&q->lock);
 	q->waitPush++;
-	while ((q->state == Q_OPEN) && pushShouldWait(q)) pthread_cond_wait(&q->pushVar, &q->lock);
+	while ((q->state == Q_OPEN) && pushShouldWait(q)){ WAIT(&q->pushVar, &q->lock); }
 	q->waitPush--;
 	if (q->state == Q_CLOSED){ /* NO more items to insert */
 		UNLOCK(&q->lock);
@@ -131,9 +117,9 @@ int tsqueue_push(tsqueue_t* q, void* elem){
 	}
 	q->size++;
 	q->activePush = false;
-	if (q->waitIter > 0) pthread_cond_broadcast(&q->iterVar);
-	else if (q->waitPop > 0) pthread_cond_broadcast(&q->popVar);
-	else pthread_cond_broadcast(&q->pushVar);
+	if (q->waitIter > 0){ BCAST(&q->iterVar); }
+	else if (q->waitPop > 0){ BCAST(&q->popVar); }
+	else { BCAST(&q->pushVar); }
 	UNLOCK(&q->lock);
 	return 0;		
 }
@@ -156,7 +142,7 @@ int tsqueue_pop(tsqueue_t* q, void** res, bool nonblocking){
 	int retval = 0;
 	LOCK(&q->lock);
 	q->waitPop++;
-	while ((q->state == Q_OPEN) && popShouldWait(q, nonblocking)) pthread_cond_wait(&q->popVar, &q->lock);
+	while ((q->state == Q_OPEN) && popShouldWait(q, nonblocking)){ WAIT(&q->popVar, &q->lock); }
 	q->waitPop--;
 	if (q->state == Q_CLOSED) retval |= QRET_CLOSED;
 	if (tsqueue_isEmpty(q)) retval |= QRET_EMPTY;
@@ -184,9 +170,9 @@ int tsqueue_pop(tsqueue_t* q, void** res, bool nonblocking){
 	free(qn);
 	q->activePop = false;
 	/* TODO Is that okay?? */
-	if (q->waitIter > 0) pthread_cond_broadcast(&q->iterVar);
-	else if (q->waitPush > 0) pthread_cond_broadcast(&q->pushVar);
-	else pthread_cond_broadcast(&q->popVar);
+	if (q->waitIter > 0) { BCAST(&q->iterVar); }
+	else if (q->waitPush > 0) { BCAST(&q->pushVar); }
+	else { BCAST(&q->popVar); }
 	UNLOCK(&q->lock);
 	return 0;
 }
@@ -246,7 +232,7 @@ int tsqueue_iter_init(tsqueue_t* q){
 	
 	LOCK(&q->lock);
 	q->waitIter++;
-	while (iterShouldWait(q)) pthread_cond_wait(&q->iterVar, &q->lock);
+	while (iterShouldWait(q)){ WAIT(&q->iterVar, &q->lock); }
 	q->waitIter--;
 	q->activeIter = true;
 	q->iter = q->head; /* Starts iteration */
@@ -267,10 +253,10 @@ int	tsqueue_iter_end(tsqueue_t* q){
 	LOCK(&q->lock);
 	q->activeIter = false;
 	/* TODO Is that okay?? */
-	if (q->waitIter > 0) pthread_cond_broadcast(&q->iterVar);
+	if (q->waitIter > 0) { BCAST(&q->iterVar); }
 	else {
-		pthread_cond_broadcast(&q->popVar);
-		pthread_cond_broadcast(&q->pushVar);
+		BCAST(&q->popVar);
+		BCAST(&q->pushVar);
 	}
 	q->iter = NULL; /* For security */
 	UNLOCK(&q->lock);
@@ -387,9 +373,9 @@ int tsqueue_flush(tsqueue_t* q, void(*freeItems)(void*)){
 	}
 	q->state = Q_CLOSED;
 	
-	pthread_cond_broadcast(&q->pushVar);
-	pthread_cond_broadcast(&q->popVar);
-	pthread_cond_broadcast(&q->iterVar);
+	BCAST(&q->pushVar);
+	BCAST(&q->popVar);
+	BCAST(&q->iterVar);
 	UNLOCK(&q->lock);
 	
 	return 0;
@@ -403,10 +389,10 @@ int tsqueue_flush(tsqueue_t* q, void(*freeItems)(void*)){
  */
 int tsqueue_destroy(tsqueue_t* q, void(*freeItems)(void*)){
 	SYSCALL_RETURN(tsqueue_flush(q, freeItems), -1, "tsqueue_destroy:error while flushing queue");
-	pthread_mutex_destroy(&q->lock);
-	pthread_cond_destroy(&q->pushVar);
-	pthread_cond_destroy(&q->popVar);
-	pthread_cond_destroy(&q->iterVar);
+	MTX_DESTROY(&q->lock);
+	CD_DESTROY(&q->pushVar);
+	CD_DESTROY(&q->popVar);
+	CD_DESTROY(&q->iterVar);
 	free(q);
 	return 0;
 }

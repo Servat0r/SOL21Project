@@ -24,11 +24,16 @@ bool
 	isUseless(char*),
 	isPath(char*),
 	strtoupper(char*, const char*, size_t),
-	strequal(char*, char*);
+	strequal(char*, char*),
+	isNumber(char* str),
+	isFPNumber(char* str);
 	
 int
 	readn(long, void*, size_t),
-	writen(long, void*, size_t);
+	writen(long, void*, size_t),
+	getInt(char* str, long* val),
+	getFloat(char* str, float* val);
+
 	
 /**
  * @brief Utility procedure for printing errors.
@@ -51,4 +56,3 @@ static inline void print_error(const char * str, ...) {
 }
 
 #endif /* _UTIL_H */
-

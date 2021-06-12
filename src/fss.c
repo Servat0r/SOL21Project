@@ -163,63 +163,6 @@ int fss_rop_end(fss_t* fss){
 
 
 /**
- * @brief Terminates the current reading/writing operation and makes the current thread
- * waiting for the needed lock to be unlocked.
- * @return 0 on success, -1 on error.
- */
-int fss_wait(fss_t* fss){
-	int type;
-	LOCK(&fss->gblock);
-	int errno_copy = errno;
-	
-	if (fss->state > 0){ type = 0; fss->state--; }
-	else if (fss->state < 0){ type = 1; fss->state++; }
-	
-	if (type == 0){
-		if ((fss->state == 0) && (fss->waiters[1] > 0)){ SIGNAL(&fss->conds[1]); }
-	} else {
-		if (fss->waiters[1] > 0){ SIGNAL(&fss->conds[1]); }
-		else { BCAST(&fss->conds[0]); }
-	}
-	
-	fss->lock_waiters++;
-	WAIT(&fss->lock_cond, &fss->gblock);
-	fss->lock_waiters--;
-	errno = errno_copy;
-	UNLOCK(&fss->gblock);
-	return 0;
-}
-
-
-/**
- * @brief Terminates the current reading/writing operation and wakes up all threads
- * waiting for any lock to become unlocked.
- * @return 0 on success, -1 on error.
- */
-int fss_wakeup_end(fss_t* fss){
-	int type;
-	LOCK(&fss->gblock);
-	int errno_copy = errno;
-	
-	if (fss->state > 0) { type = 0; fss->state--; }
-	else if (fss->state < 0){ type = 1; fss->state++; }
-	
-	if (fss->lock_waiters > 0){ BCAST(&fss->lock_cond); }
-	
-	if (type == 0){
-		if ((fss->state == 0) && (fss->waiters[1] > 0)){ SIGNAL(&fss->conds[1]); }
-	} else {
-		if (fss->waiters[1] > 0){ SIGNAL(&fss->conds[1]); }
-		else { BCAST(&fss->conds[0]); }		
-	}
-	
-	errno = errno_copy;
-	UNLOCK(&fss->gblock);
-	return 0;
-}
-
-
-/**
  * @brief Initializes a writing operation on the filesystem (i.e., it can modify which files are
  * stored inside).
  * @return 0 on success, -1 on error.
@@ -248,8 +191,6 @@ int fss_wop_end(fss_t* fss){
 	LOCK(&fss->gblock);
 	int errno_copy = errno;
 	fss->state++;
-	/* A create/remove could have eliminated files whose lock someone is waiting for */
-	if (fss->lock_waiters > 0){ BCAST(&fss->lock_cond); }
 	
 	if (fss->waiters[1] > 0) { SIGNAL(&fss->conds[1]); }
 	else { BCAST(&fss->conds[0]); }
@@ -301,14 +242,15 @@ int	fss_init(fss_t* fss, int nbuckets, size_t storageCap, int maxFileNo){
 	memset(fss, 0, sizeof(fss_t));
 	fss->maxFileNo = maxFileNo;
 	fss->storageCap = storageCap;
-	SYSCALL_RETURN(pthread_mutex_init(&fss->gblock, NULL), -1, "While initializing global lock");
-	SYSCALL_RETURN(pthread_mutex_init(&fss->wlock, NULL), -1, "While initializing wlock");
+	
+	MTX_INIT(&fss->gblock, NULL);
+	MTX_INIT(&fss->wlock, NULL);
 	
 	fss->replQueue = tsqueue_init();
 	if (!fss->replQueue){
 		perror("While initializing FIFO replacement queue");
-		pthread_mutex_destroy(&fss->gblock);
-		pthread_mutex_destroy(&fss->wlock);
+		MTX_DESTROY(&fss->gblock);
+		MTX_DESTROY(&fss->wlock);
 		errno = ENOMEM;
 		return -1;
 	}
@@ -316,8 +258,8 @@ int	fss_init(fss_t* fss, int nbuckets, size_t storageCap, int maxFileNo){
 	fss->fmap = icl_hash_create(nbuckets, NULL, NULL);
 	if (!fss->fmap){
 		tsqueue_destroy(fss->replQueue, dummy);
-		pthread_mutex_destroy(&fss->gblock);
-		pthread_mutex_destroy(&fss->wlock);
+		MTX_DESTROY(&fss->gblock);
+		MTX_DESTROY(&fss->wlock);
 		errno = ENOMEM;
 		return -1;
 	}
@@ -740,8 +682,8 @@ int	fss_destroy(fss_t* fss){
 	if (!fss){ errno = EINVAL; return -1; }
 
 	icl_hash_destroy(fss->fmap, free, fdata_destroy);
-	pthread_mutex_destroy(&fss->gblock);
-	pthread_mutex_destroy(&fss->wlock);
+	MTX_DESTROY(&fss->gblock);
+	MTX_DESTROY(&fss->wlock);
 	
 	tsqueue_destroy(fss->replQueue, free);
 	

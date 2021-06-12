@@ -7,7 +7,7 @@
 #define CHECK_MAXCLIENT(fdata, client) \
 	do { \
 		if (client > fdata->maxclient){ \
-			pthread_rwlock_unlock(&fdata->lock); \
+			RWL_UNLOCK(&fdata->lock); \
 			errno = EINVAL; \
 			return -1; \
 		} \
@@ -31,12 +31,12 @@
 int fdata_resize(fdata_t* fdata, int client){
 	if (!fdata || (client < 0)){ errno = EINVAL; return -1; }
 
-	pthread_rwlock_wrlock(&fdata->lock);
+	RWL_WRLOCK(&fdata->lock);
 	
 	if (client > fdata->maxclient){
 		unsigned char* ptr = realloc(fdata->clients, (client + 1) * sizeof(unsigned char));
 		if (!ptr){
-			pthread_rwlock_unlock(&fdata->lock);
+			RWL_UNLOCK(&fdata->lock);
 			errno = ENOMEM;
 			return -1;
 		} else {
@@ -45,7 +45,7 @@ int fdata_resize(fdata_t* fdata, int client){
 			fdata->maxclient = client;
 		}
 	}
-	pthread_rwlock_unlock(&fdata->lock);
+	RWL_UNLOCK(&fdata->lock);
 	
 	return 0;
 }
@@ -96,7 +96,7 @@ fdata_t* fdata_create(int maxclient, int creator, bool locking){ /* -> fss_creat
 	memset(fdata->clients, 0, (maxclient + 1)*sizeof(char));
 	fdata->maxclient = maxclient;
 	
-	CHECK_COND_EXIT(pthread_rwlock_init(&fdata->lock, NULL) == 0, "fdata_create: while initializing rwlock object");
+	RWL_INIT(&fdata->lock, NULL);
 	
 	/* Gives access to creator */
 	fdata->clients[creator] |= LF_OPEN;
@@ -127,11 +127,11 @@ int fdata_open(fdata_t* fdata, int client, bool locking){ /* -> fss_open */
 
 	if ((!fdata) || (client < 0)){ errno = EINVAL; return -1; }
 	
-	pthread_rwlock_rdlock(&fdata->lock);
+	RWL_RDLOCK(&fdata->lock);
 	CHECK_MAXCLIENT(fdata, client);
 		if (!(fdata->clients[client] & LF_OPEN)) fdata->clients[client] |= LF_OPEN; /* file opened */
 		else {  /* file ALREADY open */
-			pthread_rwlock_unlock(&fdata->lock);
+			RWL_UNLOCK(&fdata->lock);
 			errno = EBADF;
 			return -1;
 		}
@@ -141,20 +141,20 @@ int fdata_open(fdata_t* fdata, int client, bool locking){ /* -> fss_open */
 		- or fail because of connection closing or fatal error (=> LF_WRITE becomes "useless").
 	*/
 	fdata->clients[client] &= ~LF_WRITE;
-	pthread_rwlock_unlock(&fdata->lock);
+	RWL_UNLOCK(&fdata->lock);
 	
 	if (locking){
-		pthread_rwlock_wrlock(&fdata->lock);
+		RWL_WRLOCK(&fdata->lock);
 		CHECK_MAXCLIENT(fdata, client);
 		int ret = fdata_lock(fdata, client);
 		if (ret == -1){
 			fdata->clients[client] &= ~LF_OPEN; /* Operation failed */
 			int errno_copy = errno;
-			pthread_rwlock_unlock(&fdata->lock);
+			RWL_UNLOCK(&fdata->lock);
 			errno = errno_copy;
 			return -1;
 		}
-		pthread_rwlock_unlock(&fdata->lock);
+		RWL_UNLOCK(&fdata->lock);
 		return ret;
 	} else return 0;
 }
@@ -175,20 +175,20 @@ int fdata_close(fdata_t* fdata, int client){ /* -> fss_close */
 		return -1;
 	}
 	
-	pthread_rwlock_rdlock(&fdata->lock);
+	RWL_RDLOCK(&fdata->lock);
 	
 	CHECK_MAXCLIENT(fdata, client);
 	
 	if (fdata->clients[client] & LF_OPEN) fdata->clients[client] &= ~LF_OPEN; /* file closed */
 	else { /* file NOT open */
-		pthread_rwlock_unlock(&fdata->lock);
+		RWL_UNLOCK(&fdata->lock);
 		errno = EBADF;
 		return -1;
 	}
 	
 	fdata->clients[client] &= ~LF_WRITE; /* A writeFile will fail */
 	
-	pthread_rwlock_unlock(&fdata->lock);
+	RWL_UNLOCK(&fdata->lock);
 
 	return 0;
 }
@@ -212,13 +212,13 @@ int fdata_read(fdata_t* fdata, void** buf, size_t* size, int client, bool ign_op
 		return -1;
 	}
 	
-	pthread_rwlock_rdlock(&fdata->lock);
+	RWL_RDLOCK(&fdata->lock);
 	
 	CHECK_MAXCLIENT(fdata, client);
 	
 	/* If ign_open == true, this check shall be skipped */
 	if (!ign_open && (fdata->flags & O_LOCK) && !(fdata->clients[client] & LF_OWNER)){
-		pthread_rwlock_unlock(&fdata->lock);
+		RWL_UNLOCK(&fdata->lock);
 		errno = EBUSY;
 		return -1;
 	}
@@ -227,7 +227,7 @@ int fdata_read(fdata_t* fdata, void** buf, size_t* size, int client, bool ign_op
 	if (ign_open || (fdata->clients[client] & LF_OPEN)) { /* file open */
 		*buf = malloc(fdata->size);
 		if (*buf == NULL){
-			pthread_rwlock_unlock(&fdata->lock);
+			RWL_UNLOCK(&fdata->lock);
 			errno = ENOMEM;
 			return -1;
 		} else {
@@ -236,7 +236,7 @@ int fdata_read(fdata_t* fdata, void** buf, size_t* size, int client, bool ign_op
 			*size = fdata->size;
 		}
 	} else { /* !ign_open && !(LF_OPEN set) */
-		pthread_rwlock_unlock(&fdata->lock);
+		RWL_UNLOCK(&fdata->lock);
 		errno = EBADF;
 		return -1; /* file NOT open */
 	}
@@ -244,7 +244,7 @@ int fdata_read(fdata_t* fdata, void** buf, size_t* size, int client, bool ign_op
 	/* This is ok also for readNFiles: LF_WRITE is reset iff this file is chosen */
 	fdata->clients[client] &= ~LF_WRITE; /* A writeFile will fail */
 
-	pthread_rwlock_unlock(&fdata->lock);
+	RWL_UNLOCK(&fdata->lock);
 	
 	return 0;
 }
@@ -269,24 +269,24 @@ int	fdata_write(fdata_t* fdata, void* buf, size_t size, int client, bool wr){
 		return -1;
 	}
 
-	pthread_rwlock_wrlock(&fdata->lock);
+	RWL_WRLOCK(&fdata->lock);
 	
 	CHECK_MAXCLIENT(fdata, client);
 	
 	if ((fdata->flags & O_LOCK) && !(fdata->clients[client] & LF_OWNER)){ /* File is locked by another client */
-		pthread_rwlock_unlock(&fdata->lock);
+		RWL_UNLOCK(&fdata->lock);
 		errno = EBUSY;
 		return -1;
 	}
 	
 	if (!(fdata->clients[client] & LF_OPEN)) {
-		pthread_rwlock_unlock(&fdata->lock);
+		RWL_UNLOCK(&fdata->lock);
 		errno = EBADF;
 		return -1;
 	}
 	
 	if (wr && !(fdata->clients[client] & LF_WRITE)){
-		pthread_rwlock_unlock(&fdata->lock);
+		RWL_UNLOCK(&fdata->lock);
 		errno = EBADF;
 		return -1;
 	}
@@ -294,7 +294,7 @@ int	fdata_write(fdata_t* fdata, void* buf, size_t size, int client, bool wr){
 	if (!fdata->data){
 		fdata->data = malloc(size);
 		if (!fdata->data){
-			pthread_rwlock_unlock(&fdata->lock);
+			RWL_UNLOCK(&fdata->lock);
 			errno = ENOMEM;
 			return -1;
 		} else {
@@ -305,7 +305,7 @@ int	fdata_write(fdata_t* fdata, void* buf, size_t size, int client, bool wr){
 		size_t newsize = fdata->size + size;
 		void* ptr = realloc(fdata->data, newsize);
 		if (!ptr){
-			pthread_rwlock_unlock(&fdata->lock);
+			RWL_UNLOCK(&fdata->lock);
 			errno = ENOMEM;
 			return -1;
 		} else {
@@ -320,7 +320,7 @@ int	fdata_write(fdata_t* fdata, void* buf, size_t size, int client, bool wr){
 
 	fdata->clients[client] &= ~LF_WRITE; /* A writeFile will fail */
 
-	pthread_rwlock_unlock(&fdata->lock);
+	RWL_UNLOCK(&fdata->lock);
 
 	return 0;
 }
@@ -340,14 +340,14 @@ int fdata_lock(fdata_t* fdata, int client){
 		return -1;
 	}
 	
-	pthread_rwlock_wrlock(&fdata->lock);
+	RWL_WRLOCK(&fdata->lock);
 	
 	CHECK_MAXCLIENT(fdata, client);
 	
 	if ((fdata->flags & O_LOCK) && !(fdata->clients[client] & LF_OWNER)){
 		int* wfd = malloc(sizeof(int));
 		if (!wfd){
-			pthread_rwlock_unlock(&fdata->lock);
+			RWL_UNLOCK(&fdata->lock);
 			errno = ENOMEM;
 			return -1;
 		}
@@ -355,11 +355,11 @@ int fdata_lock(fdata_t* fdata, int client){
 		int w = tsqueue_push(fdata->waiting, wfd);
 		if (w == 0){
 			fdata->clients[client] |= LF_WAIT;
-			pthread_rwlock_unlock(&fdata->lock);
+			RWL_UNLOCK(&fdata->lock);
 			return 1;
 		} else {
 			free(wfd);
-			pthread_rwlock_unlock(&fdata->lock);
+			RWL_UNLOCK(&fdata->lock);
 			return -1;
 		}
 	} else {
@@ -368,7 +368,7 @@ int fdata_lock(fdata_t* fdata, int client){
 	}
 	
 	fdata->clients[client] &= ~LF_WRITE; /* A writeFile will fail */
-	pthread_rwlock_unlock(&fdata->lock);
+	RWL_UNLOCK(&fdata->lock);
 	
 	return 0;
 }
@@ -392,7 +392,7 @@ int fdata_unlock(fdata_t* fdata, int client, llist_t** newowner){
 	
 	int* n_own = NULL;
 	
-	pthread_rwlock_wrlock(&fdata->lock);
+	RWL_WRLOCK(&fdata->lock);
 	
 	CHECK_MAXCLIENT(fdata, client);
 	
@@ -410,17 +410,17 @@ int fdata_unlock(fdata_t* fdata, int client, llist_t** newowner){
 		} else {
 			fdata->flags &= ~O_LOCK; /* Unlocks it however */ //FIXME Sure??
 			int errno_copy = errno;
-			pthread_rwlock_unlock(&fdata->lock);
+			RWL_UNLOCK(&fdata->lock);
 			errno = errno_copy;
 			return -1;
 		}
 	} else {
-		pthread_rwlock_unlock(&fdata->lock);
+		RWL_UNLOCK(&fdata->lock);
 		return 1;
 	}
 	
 	fdata->clients[client] &= ~LF_WRITE; /* A writeFile will fail */	
-	pthread_rwlock_unlock(&fdata->lock);
+	RWL_UNLOCK(&fdata->lock);
 
 	return 0;
 }
@@ -444,7 +444,7 @@ int fdata_removeClient(fdata_t* fdata, int client, llist_t** newowner){
 	int ret = 0;
 	//*newowner = NULL;
 	
-	pthread_rwlock_wrlock(&fdata->lock);
+	RWL_WRLOCK(&fdata->lock);
 	
 	CHECK_MAXCLIENT(fdata, client);
 	
@@ -452,7 +452,7 @@ int fdata_removeClient(fdata_t* fdata, int client, llist_t** newowner){
 	
 	if (fdata->clients[client] & LF_WAIT){
 		if (tsqueue_iter_init(fdata->waiting) == -1){
-			pthread_rwlock_unlock(&fdata->lock);
+			RWL_UNLOCK(&fdata->lock);
 			return -1;
 		}
 		int* r;
@@ -461,7 +461,7 @@ int fdata_removeClient(fdata_t* fdata, int client, llist_t** newowner){
 			if (*r == client){
 				if ((res2 = tsqueue_iter_remove(fdata->waiting, &r)) == -1){ /* queue is untouched */
 					tsqueue_iter_end(fdata->waiting);
-					pthread_rwlock_unlock(&fdata->lock);
+					RWL_UNLOCK(&fdata->lock);
 					return -1;
 				} else if (res2 == 0) free(r);
 				break;
@@ -469,11 +469,11 @@ int fdata_removeClient(fdata_t* fdata, int client, llist_t** newowner){
 		}
 		//TODO Andrebbe sostituita con una SYSCALL_EXIT (anche la init e la tsqueue_iter_end di sopra)
 		if (tsqueue_iter_end(fdata->waiting) == -1){ //FIXME Va messa qui??
-			pthread_rwlock_unlock(&fdata->lock);
+			RWL_UNLOCK(&fdata->lock);
 			return -1;
 		}
 		if (res1 == -1){ /* Error on iteration */
-			pthread_rwlock_unlock(&fdata->lock);
+			RWL_UNLOCK(&fdata->lock);
 			return -1;
 		}
 		/* If (res1 == 1), iteration has ended without finding client in the waiting queue */
@@ -482,7 +482,7 @@ int fdata_removeClient(fdata_t* fdata, int client, llist_t** newowner){
 		ret = fdata_unlock(fdata, client, newowner); /* ret will NEVER be 1 */
 	}
 
-	pthread_rwlock_unlock(&fdata->lock);
+	RWL_UNLOCK(&fdata->lock);
 	
 	return ret;
 }
@@ -491,11 +491,11 @@ int fdata_removeClient(fdata_t* fdata, int client, llist_t** newowner){
 tsqueue_t* fdata_waiters(fdata_t* fdata){
 	if (!fdata){ errno = EINVAL; return NULL; }
 	
-	pthread_rwlock_wrlock(&fdata->lock);
+	RWL_WRLOCK(&fdata->lock);
 	tsqueue_t* waitQueue = fdata->waiting;
 	fdata->waiting = NULL;
 	for (int i = 0; i < fdata->maxclient; i++) fdata->clients[i] &= ~LF_WAIT;
-	pthread_rwlock_unlock(&fdata->lock);
+	RWL_UNLOCK(&fdata->lock);
 	return waitQueue;
 }
 
@@ -511,7 +511,7 @@ tsqueue_t* fdata_waiters(fdata_t* fdata){
 void fdata_destroy(fdata_t* fdata){
 	if (!fdata){ errno = EINVAL; return; }
 
-	pthread_rwlock_wrlock(&fdata->lock);
+	RWL_WRLOCK(&fdata->lock);
 	if (fdata->clients){
 		free(fdata->clients);
 		fdata->clients = NULL;
@@ -526,9 +526,9 @@ void fdata_destroy(fdata_t* fdata){
 		tsqueue_destroy(fdata->waiting, free);
 		fdata->waiting = NULL;
 	}
-	pthread_rwlock_unlock(&fdata->lock);
+	RWL_UNLOCK(&fdata->lock);
 
-	pthread_rwlock_destroy(&fdata->lock);
+	RWL_DESTROY(&fdata->lock);
 
 	free(fdata);
 }
@@ -538,7 +538,7 @@ void fdata_destroy(fdata_t* fdata){
  * @brief Prints out all metadata and file content of the file.
  */
 void fdata_printout(fdata_t* fdata){
-	pthread_rwlock_rdlock(&fdata->lock);
+	RWL_RDLOCK(&fdata->lock);
 	printf("fdata->size = %lu\n", fdata->size);
 	printf("fdata->flags = %d\n", fdata->flags);
 	printf("locked(fdata) = ");
@@ -552,5 +552,5 @@ void fdata_printout(fdata_t* fdata){
 	printf("\nfile content: \n");
 	write(1, fdata->data, fdata->size); /* Avoid invalid reads in absence of '\0' character */
 	printf("\n");
-	pthread_rwlock_unlock(&fdata->lock);
+	RWL_UNLOCK(&fdata->lock);
 }
