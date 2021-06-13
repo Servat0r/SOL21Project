@@ -47,13 +47,8 @@ int
 	fdata_write(fdata_t*, void*, size_t, int, bool), /* fss_write/fss_append */
 	fdata_lock(fdata_t*, int), /* (try)lock */
 	fdata_unlock(fdata_t*, int, llist_t** newowner), /* (try)unlock and returns new owner (if any) */
-	fdata_removeClient(fdata_t*, int, llist_t** newowner); /* removes all info of a set of clients */
-
-size_t
-	fdata_totalSize(fdata_t*);
-
-bool
-	fdata_canUpload(fdata_t*, int); /* true <=> a writeFile by client will NOT fail */
+	fdata_removeClient(fdata_t*, int, llist_t** newowner), /* removes all info of a set of clients */
+	fdata_resize(fdata_t* fdata, int client); /* fss->resize */
 
 tsqueue_t*
 	fdata_waiters(fdata_t*);

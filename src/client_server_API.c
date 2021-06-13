@@ -354,8 +354,10 @@ int appendToFile(const char* pathname, void* buf, size_t size, const char* dirna
 			res = 0;
 			break;
 		} else if (msg->type == M_GETF){
-			if (saveFile((const char*)msg->args[0].content, dirname, msg->args[1].content, msg->args[1].len) == -1){
-				perror("appendToFile:while saving received file");
+			if (*msg->args[2].content == true){ /* File had O_DIRTY bit set and so it needs to be saved */
+				if (saveFile((const char*)msg->args[0].content, dirname, msg->args[1].content, msg->args[1].len) == -1){
+					perror("appendToFile:while saving received file");
+				}
 			}
 			msg_destroy(msg, free, free);
 			continue; /* Continues loop */
@@ -415,8 +417,10 @@ int writeFile(const char* pathname, const char* dirname){
 			res = 0;
 			break;
 		} else if (msg->type == M_GETF){
-			if (saveFile((const char*)msg->args[0].content, dirname, msg->args[1].content, msg->args[1].len) == -1){
-				perror("writeFile:while saving received file");
+			if (*msg->args[2].content == true){ /* File had O_DIRTY bit set and so it needs to be saved */
+				if (saveFile((const char*)msg->args[0].content, dirname, msg->args[1].content, msg->args[1].len) == -1){
+					perror("writeFile:while saving received file");
+				}
 			}
 			msg_destroy(msg, free, free);
 			continue; /* Continues loop */

@@ -90,7 +90,7 @@ static int fss_trash(fss_t* fss, fdata_t* fdata, char* filename){
  *	- EINVAL: invalid arguments;
  *	- any error by llist_pop and icl_hash_find/delete.
  */
-static int fss_replace(fss_t* fss, int client, int mode, size_t size, int (*waitHandler)(tsqueue_t* waitQueue), int (*sendBackHandler)(void* content, size_t size, int cfd)){
+static int fss_replace(fss_t* fss, int client, int mode, size_t size, int (*waitHandler)(tsqueue_t* waitQueue), int (*sendBackHandler)(void* content, size_t size, int cfd, bool modified)){
 	if (!fss || !waitHandler || (client < 0) || (mode != R_CREATE && mode != R_WRITE)){ errno = EINVAL; return -1; }
 	int ret = 0;
 	char* next;
@@ -112,7 +112,7 @@ static int fss_replace(fss_t* fss, int client, int mode, size_t size, int (*wait
 		if (sendBackHandler){ /* Passed an handler to send back file content (NULL for fss_create!) */
 			void* file_content = file->data;
 			size_t file_size = file->size;
-			sendBackHandler(file_content, file_size, client); /* Errors are ignored (file content and size are untouched) */ //FIXME Sure??
+			sendBackHandler(file_content, file_size, client, (file->flags & O_DIRTY ? true : false)); /* Errors are ignored (file content and size are untouched) */ //FIXME Sure??
 		}
 		fss_trash(fss, file, next); /* Updates automatically spaceSize */
 		free(next); /* Frees key extracted from replQueue */
@@ -238,11 +238,12 @@ int fss_op_chmod(fss_t* fss){
  *	- ENOMEM: unable to allocate internal data structures;
  *	- any error by pthread_mutex_init/destroy, by llist_init/destroy and by icl_hash_create.
  */
-int	fss_init(fss_t* fss, int nbuckets, size_t storageCap, int maxFileNo){
-	if (!fss || (storageCap == 0) || (maxFileNo == 0) || (nbuckets <= 0)){ errno = EINVAL; return -1; }
+int	fss_init(fss_t* fss, int nbuckets, size_t storageCap, int maxFileNo, int maxclient){
+	if (!fss || (storageCap == 0) || (maxFileNo == 0) || (nbuckets <= 0) || (maxclient < 0)){ errno = EINVAL; return -1; }
 	memset(fss, 0, sizeof(fss_t));
 	fss->maxFileNo = maxFileNo;
 	fss->storageCap = storageCap;
+	fss->maxclient = maxclient;
 	
 	MTX_INIT(&fss->gblock, NULL);
 	MTX_INIT(&fss->wlock, NULL);
@@ -258,13 +259,39 @@ int	fss_init(fss_t* fss, int nbuckets, size_t storageCap, int maxFileNo){
 
 	fss->fmap = icl_hash_create(nbuckets, NULL, NULL);
 	if (!fss->fmap){
-		tsqueue_destroy(fss->replQueue, dummy);
+		SYSCALL_EXIT(tsqueue_destroy(fss->replQueue, dummy), "fss_init: while destroying FIFO replacement queue after error on initialization");
 		MTX_DESTROY(&fss->gblock);
 		MTX_DESTROY(&fss->wlock);
 		errno = ENOMEM;
 		return -1;
 	}
-	
+	return 0;
+}
+
+
+/**
+ * @brief Resizes client-array of ALL files at once such that ALL files would have their maxclient field >= newmax.
+ * @param newmax -- New minimum value for maximum client identifier for ALL files.
+ * @return 0 on success, -1 on error.
+ * Possible errors are:
+ *	- EINVAL: invalid arguments.
+ */
+int	fss_resize(fss_t* fss, int newmax){
+	if (!fss || (newmax < 0)){ errno = EINVAL; return -1; }
+	int tmpint;
+	icl_entry_t* tmpent;
+	char* filename;
+	fdata_t* file;
+	fss_rop_init(fss);
+	if (fss->maxclient < newmax){
+		fss_op_chmod(fss); /* From "reader" to "writer" */
+		icl_hash_foreach(fss->fmap, tmpint, tmpent, filename, file){
+			SYSCALL_EXIT(fdata_resize(file, newmax), "fss_resize: while resizing file's client-array");
+		}
+		fss->maxclient = newmax;
+		fss_op_chmod(fss); /* From "writer" to "reader" */
+	}
+	fss_rop_end(fss);
 	return 0;
 }
 
@@ -280,8 +307,10 @@ int	fss_init(fss_t* fss, int nbuckets, size_t storageCap, int maxFileNo){
  *	- any error by fss_replace, fss_search, fdata_create,
  *	make_entry, icl_hash_insert, llist_push. 
  */
-int	fss_create(fss_t* fss, char* pathname, int maxclients, int client, bool locking, int (*waitHandler)(tsqueue_t* waitQueue)){
-	if (!fss || !pathname || (client < 0) || (maxclients < 0) || (maxclients < client) || !waitHandler){ errno = EINVAL; return -1; }
+int	fss_create(fss_t* fss, char* pathname, int client, bool locking, int (*waitHandler)(tsqueue_t* waitQueue)){
+	if (!fss){ errno = EINVAL; return -1; }
+	int maxclients = fss->maxclient;
+	if (!pathname || (client < 0) || (maxclients < client) || !waitHandler){ errno = EINVAL; return -1; }
 	int ret = 0;
 	fdata_t* file;
 	bool bcreate = false;

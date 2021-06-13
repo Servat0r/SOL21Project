@@ -54,6 +54,7 @@ typedef struct fss_s {
 	int waiters[2]; /* waiters[i] == #{threads in attesa per un'operazione di tipo i} */
 	pthread_cond_t conds[2]; /* actives[i] == #{threads sospesi per un'operazione di tipo i} */	
 	int state; /* actives[i] == #{threads attivi su un'operazione di tipo i} */
+	int maxclient; /* (GLOBAL) maximum client number */
 	
 	pthread_mutex_t wlock; /* Lock per far accedere gli scrittori uno alla volta */
 		
@@ -80,26 +81,28 @@ void
 
 int
 	/* Creation / Destruction */
-	fss_init(fss_t* fss, int nbuckets, size_t storageCap, int maxFileNo),
+	fss_init(fss_t* fss, int nbuckets, size_t storageCap, int maxFileNo, int maxclient),
 	fss_destroy(fss_t* fss), //TODO Valutare se aggiungere anche qui un waitHandler come parametro
 
 	/* Modifying operations */
 	//TODO Valutare se aggiungere anche qui un sendBackHandler come parametro (per rispedire indietro i file espulsi)
-	fss_create(fss_t* fss, char* pathname, int maxclient, int creator, bool locking, int (*waitHandler)(tsqueue_t* waitQueue)),
+	fss_create(fss_t* fss, char* pathname, int creator, bool locking, int (*waitHandler)(tsqueue_t* waitQueue)),
 	/* newowners_list shall contain a list of ALL awaken clients that need to be notified */
 	fss_clientCleanup(fss_t*, int client, llist_t** newowners_list),
 	/* Here the caller KNOWS that the file is being removed and does NOT need to be notified via function parameter */
 	fss_remove(fss_t*, char* pathname, int client, int (*waitHandler)(tsqueue_t* waitQueue)),
+	/* GLOBAL resizing of fdata objects' clients-arrays such that ALL arrays have AT LEAST the specified size */
+	fss_resize(fss_t*, int newmax),
 	
 	/* Non-modifying operations that DO NOT call modifying ones */
 	fss_open(fss_t* fss, char* pathname, int client, bool locking),
 	fss_close(fss_t*, char* pathname, int client),
 	fss_read(fss_t*, char* pathname, void** buf, size_t*, int client),
-	fss_readN(fss_t*, int client, int N, llist_t* results), //TODO Implementare! <<<==
+	fss_readN(fss_t*, int client, int N, llist_t* results),
 	
 	/* Non-modifying operations that COULD call modifying ones */
 	fss_write(fss_t*, char* pathname, void* buf, size_t size, int client, bool wr, 
-		int (*waitHandler)(tsqueue_t* waitQueue), int (*sendBackHandler)(void* content, size_t size, int cfd)),
+		int (*waitHandler)(tsqueue_t* waitQueue), int (*sendBackHandler)(void* content, size_t size, int cfd, bool modified)),
 	
 	/* Registrazione di cosa ogni thread vuole fare:
 	 * rop -> un'operazione che NON modifica l'insieme dei file presenti (ad es. open/close/read ma anche write/append perché queste NON aggiungono/rimuovono file)
