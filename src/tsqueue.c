@@ -305,8 +305,10 @@ int	tsqueue_iter_remove(tsqueue_t* q, void** elem){
 		UNLOCK(&q->lock);
 		return -1;
 	}
-	if (!q->iter || (q->size == 0)) return 1; /* Iteration ended or empty queue */
-	else if ((q->iter == q->head) || (q->size == 1)){
+	if (!q->iter || (q->size == 0)){ /* Iteration ended or empty queue */
+		UNLOCK(&q->lock);
+		return 1; 
+	} else if ((q->iter == q->head) || (q->size == 1)){
 		tsqueue_node_t* qn = q->head;
 		*elem = qn->elem;
 		q->head = qn->next;

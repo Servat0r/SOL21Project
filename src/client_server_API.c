@@ -173,13 +173,13 @@ int openFile(const char* pathname, int flags){
 		return -1;
 	}
 	
-	/* Creates message and sends to server */
+	/* Creates message and sends to server; if there is an error, we would be able to free any other resource before exiting the client */
 	SYSCALL_RETURN(msend(serverfd, &msg, M_OPENF, "openFile: while creating message to send", 
 		"openFile: while creating message to send", strlen(pathname) + 1, pathname, sizeof(int), &flags), -1, NULL);
 
 	/* Decodes message */
 	while (true){
-		/* Receives message(s) from server */
+		/* Receives message(s) from server; if there is an error, we would be able to free any other resource before exiting the client */
 		SYSCALL_RETURN(mrecv(serverfd, &msg, "openFile: while creating data to receive message", 
 			"openFile: while receiving message from server"), -1, NULL);
 		if (msg->type == M_ERR){

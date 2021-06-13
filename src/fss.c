@@ -69,7 +69,7 @@ static fdata_t* fss_search(fss_t* fss, char* pathname){ return icl_hash_find(fss
  */
 static int fss_trash(fss_t* fss, fdata_t* fdata, char* filename){	
 	size_t fsize = fdata->size;
-	if (icl_hash_delete(fss->fmap, filename, free, fdata_destroy) == -1) return -1; /* Removes mapping from hash table */
+	SYSCALL_EXIT(icl_hash_delete(fss->fmap, filename, free, fdata_destroy), "fss_trash: while eliminating file"); /* Removes mapping from hash table */
 	fss->spaceSize = fss->spaceSize - fsize;
 	return 0;
 }
@@ -156,6 +156,7 @@ int fss_rop_end(fss_t* fss){
 	int errno_copy = errno;
 	fss->state--;
 	if ((fss->state == 0) && (fss->waiters[1] > 0)){ SIGNAL(&fss->conds[1]); }
+	else { BCAST(&fss->conds[0]); }
 	UNLOCK(&fss->gblock);
 	errno = errno_copy;
 	return 0;
@@ -614,8 +615,7 @@ int fss_remove(fss_t* fss, char* pathname, int client, int (*waitHandler)(tsqueu
 		tsqueue_iter_init(fss->replQueue);
 		while ((res1 = tsqueue_iter_next(fss->replQueue, &pathcopy)) == 0){
 			if (!pathcopy) continue;
-			if (strlen(pathcopy) != n) continue;
-			if (strncmp(pathcopy, pathname, n) == 0){
+			if ( strequal(pathname, pathcopy) ){
 				if ((res2 = tsqueue_iter_remove(fss->replQueue, &pathcopy)) == -1){ /* queue is untouched */
 					tsqueue_iter_end(fss->replQueue);
 					fss_wop_end(fss);

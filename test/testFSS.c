@@ -9,12 +9,19 @@
 #define STRING "abcdefghijklmnopqrstuvwxyz1abcdefghijklmnopqrstuvwxyz2abcdefghijklmnopqrstuvwxyz3abcdefghijklmnopqrstuvwxyz4abcdefghijklmnopqrstuvwxyz5"
 /* 82 bytes */
 #define STR2 "nojwdneodnfjorenvojfenvjodb3'j233eok03dncoebdojen3dojcwnecpenckndpvcnj53bdihbedobd"
+
+#define LOREM_IPSUM "/home/servator/lorem_ipsum.txt"
+
 #define __DEBUG
 
 fss_t fss;
 
 /* This mutex is used by 'secondTest' function to print out fss_open and buf content in order */
 pthread_mutex_t mtx = PTHREAD_MUTEX_INITIALIZER;
+
+pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+
+//int waitClients[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
 /*
 Test cases:
@@ -39,6 +46,7 @@ Test cases:
 struct arg_s {
 	int who;
 	char* pathname;
+	int* waitClients;
 };
 
 
@@ -76,12 +84,12 @@ void* secondTest(struct arg_s* arg){
 	
 	assert(fss_write(&fss, arg->pathname, inbuf, 9, arg->who, false, &whandler_stub, &sbhandler_stub) == 0);
 	assert(fss_read(&fss, arg->pathname, &buf, &size, arg->who) == 0);
-	
+
 	pthread_mutex_lock(&mtx);
 	if (write(1, buf, size) == -1) perror("write");
 	printf("\n");
 	pthread_mutex_unlock(&mtx);
-	
+
 	fss_dumpfile(&fss, arg->pathname);
 	free(buf);
 	return NULL;
@@ -140,11 +148,55 @@ void* sixthTest_createwrite(void* arg){
 	assert((newowner = llist_init()));
 	assert(fss_create(&fss, filename, 20, 0, true, &whandler_stub) == 0); /* File is locked */
 	assert(fss_write(&fss, filename, STR2, 82, 0, true, &whandler_stub, &sbhandler_stub) == 0); /* Write content */
+	printf("File written\n");
+	//assert(fss_remove(&fss, filename, 0, &whandler_stub) == 0);
+	//printf("File removed\n");
 	assert(fss_unlock(&fss, filename, 0, &newowner) == 0);
 	printf("newowner_size = %d\n", newowner->size);
 	if (newowner->size > 0) printf("newowner_clientId = %d\n", newowner->head->datum);
 	assert(fss_close(&fss, filename, 0) == 0);
 	assert(fss_clientCleanup(&fss, 0, &newowner) == 0);
+	assert(llist_destroy(newowner, free) == 0);
+	printf("sixthTest - exiting\n");
+	return NULL;
+}
+
+
+void* sixthTest_locking(void* arg){
+	int id = ((struct arg_s*)arg)->who;
+	char* filename = ((struct arg_s*)arg)->pathname;
+	int* waitClients = ((struct arg_s*)arg)->waitClients;
+	llist_t* newowner;
+	assert((newowner = llist_init()));
+	int ret;
+	assert((ret = fss_open(&fss, filename, id, true)) >= 0);
+
+	pthread_mutex_lock(&mtx);
+	if (ret == 1) waitClients[id]++; /* Client waiting */
+	while (waitClients[id] > 0) { printf("%d waiting\n", id); pthread_cond_wait(&cond, &mtx); }
+	if (ret == 1){
+		ret = fss_open(&fss, filename, id, true);
+		if (ret < 0) perror("fss_open[locking]");
+	}
+	pthread_mutex_unlock(&mtx);
+
+	assert(fss_write(&fss, filename, "@A@", 3, id, false, &whandler_stub, &sbhandler_stub) == 0);
+	assert(fss_close(&fss, filename, id) == 0);
+	llistnode_t* node;
+	int* datum;
+
+	assert(fss_clientCleanup(&fss, id, &newowner) == 0);
+	
+	pthread_mutex_lock(&mtx);
+	printf("newowners list size = %lu [client %d]\n", newowner->size, id);
+	llist_foreach(newowner, node){
+		datum = node->datum;
+		printf("datum = %d\n", *datum);
+		waitClients[*datum]--;
+	}
+	pthread_cond_broadcast(&cond);
+	pthread_mutex_unlock(&mtx);
+	
 	assert(llist_destroy(newowner, free) == 0);
 	return NULL;
 }
@@ -152,12 +204,15 @@ void* sixthTest_createwrite(void* arg){
 
 int main(void){
 
-	pthread_t p[4];
-	memset(p, 0, 4 * sizeof(pthread_t));
+	pthread_t p[6];
+	memset(p, 0, 6 * sizeof(pthread_t));
+
+	int* waitClients = calloc(16, sizeof(int));
 
 	struct arg_s args1_2;
 	struct arg_s args3[4];
 	struct arg_s args4[4];
+	struct arg_s args6[3];
 
 	args1_2.who = 1; args1_2.pathname = "/home/servator/Scrivania/file1";
 
@@ -172,6 +227,8 @@ int main(void){
 	args4[1].pathname = "/home/servator/Scrivania/file7";
 	args4[2].pathname = "/home/servator/Scrivania/file8";
 	args4[3].pathname = "/home/servator/Scrivania/file9";
+	
+	for (int i = 0; i < 3; i++){ args6[i].who = i+1; args6[i].pathname = LOREM_IPSUM; args6[i].waitClients = waitClients;}
 
 	assert(fss_init(&fss, 4, 512, 6) == 0); /* 1/2 KB capacity and 6 maxFileNo */
 
@@ -188,8 +245,6 @@ int main(void){
 	pthread_join(p[0], NULL);
 	pthread_join(p[1], NULL);
 	printf("\nSECOND TEST RESULT:\n");
-	int c[1];
-	c[0] = 1;
 	llist_t* l = llist_init();
 	assert(l != NULL);
 	fss_clientCleanup(&fss, 1, &l);
@@ -212,17 +267,21 @@ int main(void){
 	fss_dumpAll(&fss);
 
 	/* Fifth test */
+	printf("\nFIFTH TEST RESULT:\n");
 	pthread_create(&p[0], NULL, fifthTest, NULL);
 	pthread_join(p[0], NULL);
-	printf("\nFIFTH TEST RESULT:\n");
 	fss_dumpAll(&fss);
 
 	/* Sixth test */
-	pthread_create(&p[0], NULL, sixthTest_createwrite, "/home/servator/lorem_ipsum.txt");
-	pthread_join(p[0], NULL);
 	printf("\nSIXTH TEST RESULT:\n");
+	pthread_create(&p[0], NULL, sixthTest_createwrite, LOREM_IPSUM);
+	pthread_join(p[0], NULL);
+	for (int i = 0; i < 3; i++) pthread_create(&p[i], NULL, sixthTest_locking, &args6[i]);
+	for (int i = 0; i < 3; i++) pthread_join(p[i], NULL);
 	fss_dumpAll(&fss);
 
 	fss_destroy(&fss);
+	
+	free(waitClients);
 	return 0;
 }

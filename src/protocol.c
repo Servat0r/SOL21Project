@@ -56,21 +56,22 @@ ssize_t getArgn(msg_t type){
 		case M_OK:
 			return 0;
 		
-		case M_ERR:
-		case M_READF:
-		case M_READNF:
-		case M_CLOSEF:
-		case M_LOCKF:
-		case M_UNLOCKF:
-		case M_REMOVEF:
+		case M_ERR: /* errno code */
+		case M_READF: /* filename */
+		case M_READNF: /* filename */
+		case M_CLOSEF: /* filename */
+		case M_LOCKF: /* filename */
+		case M_UNLOCKF: /* filename */
+		case M_REMOVEF: /* filename */
 			return 1;
 
-		case M_OPENF:
-		case M_GETF:
-		case M_WRITEF:
-		case M_APPENDF:
+		case M_OPENF: /* filename, flags */
+		case M_WRITEF: /* filename, content */
+		case M_APPENDF: /* filename, content */
 			return 2;
-		
+
+		case M_GETF:
+			return 3; /* filename, filecontent, modified? */		
 	}
 	return -1; /* type is not valid */
 }
@@ -211,8 +212,10 @@ int msg_send(message_t* msg, int fd){
  * msg_init for not losing data.
  * @return 1 on success, -1 on error during a readn, 0 if a readn returned 0 (EOF) before
  * having read ALL message bytes.
- * NOTE: If msg_recv returns -1, msg content is NOT valid and it should be destroyed with
- * msg_destroy(msg, nothing, nothing) (or (msg, NULL, NULL)).
+ * @note If msg_recv returns -1, msg content is NOT valid and it should be destroyed with
+ * msg_destroy(msg, nothing, nothing) (or (msg, NULL, NULL)). Function implementation guarantees
+ * that all heap-allocated memory for receiving arguments other than message type and argn would
+ * have been freed BEFORE returning, so there could not be memory leaks. 
  * Possible errors are:
  *	- ECONNRESET: EOF was read during a readn, and so the message has not been completely read;
  *	- ENOMEM: unable to allocate memory to store received content;
@@ -231,7 +234,7 @@ int msg_recv(message_t* msg, int fd){
 	if (res == 0){ errno = ECONNRESET; return 0; }
 	
 	msg->args = calloc(msg->argn, sizeof(packet_t));
-	if (!msg->args) return -1;
+	if (!msg->args) return -1; /* ENOMEM */
 	for (ssize_t i = 0; i < msg->argn; i++){
 	
 		res = readn(fd, &msg->args[i].len, sizeof(size_t));
@@ -318,7 +321,7 @@ int msend(int fd, message_t** msg, msg_t type, char* creatmsg, char* sendmsg, ..
  * message_t* object to which received data will be written.
  * @param creatmsg -- An error message to display on error while
  * initializing #msg.
- * @param recvmg -- An error message to display on error while
+ * @param recvmsg -- An error message to display on error while
  * receiving data into #msg.
  * @return 0 on success, -1 on error.
  * Possible errors are:

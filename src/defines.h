@@ -142,7 +142,7 @@
 #define LOCK(l) \
 	do { \
 		if (pthread_mutex_lock(l)!=0) { \
-			fprintf(stderr, "ERRORE FATALE lock\n"); \
+			fprintf(stderr, "FATAL ERROR on mutex locking\n"); \
 			exit(EXIT_FAILURE); \
 	  	} \
   	} while(0);
@@ -154,7 +154,20 @@
 #define UNLOCK(l) \
 	do { \
 		if (pthread_mutex_unlock(l)!=0) { \
-			fprintf(stderr, "ERRORE FATALE unlock\n"); \
+			fprintf(stderr, "FATAL ERROR on mutex unlocking\n"); \
+			exit(EXIT_FAILURE); \
+		} \
+	} while(0);
+
+
+/**
+ * @brief Exits the current process if the pthread_mutex_trylock fails.
+ */   
+#define TRYLOCK(l) \
+	do { \
+		int r=0; \
+		if ((r=pthread_mutex_trylock(l))!=0 && r!=EBUSY) { \
+			fprintf(stderr, "FATAL ERROR on trylock\n"); \
 			exit(EXIT_FAILURE); \
 		} \
 	} while(0);
@@ -193,7 +206,7 @@
 #define WAIT(c,l) \
 	do { \
 		if (pthread_cond_wait(c,l)!=0) { \
-			fprintf(stderr, "ERRORE FATALE wait\n"); \
+			fprintf(stderr, "FATAL ERROR on wait\n"); \
 			exit(EXIT_FAILURE); \
 		} \
 	} while(0);
@@ -207,7 +220,7 @@
 	do { \
 		int r=0; \
 		if ((r=pthread_cond_timedwait(c,l,t))!=0 && r!=ETIMEDOUT) { \
-			fprintf(stderr, "ERRORE FATALE timed wait\n"); \
+			fprintf(stderr, "FATAL ERROR on timed wait\n"); \
 			exit(EXIT_FAILURE); \
 		} \
 	} while(0);
@@ -219,7 +232,7 @@
 #define SIGNAL(c) \
 	do { \
 		if (pthread_cond_signal(c)!=0){ \
-			fprintf(stderr, "ERRORE FATALE signal\n"); \
+			fprintf(stderr, "FATAL ERROR on signal\n"); \
 			exit(EXIT_FAILURE);	\
 		} \
 	} while(0);
@@ -231,7 +244,7 @@
 #define BCAST(c) \
 	do { \
 		if (pthread_cond_broadcast(c)!=0){ \
-			fprintf(stderr, "ERRORE FATALE broadcast\n"); \
+			fprintf(stderr, "FATAL ERROR on broadcast\n"); \
 			exit(EXIT_FAILURE); \
 		} \
 	} while(0);
@@ -239,13 +252,16 @@
 
 /* ********** RWLOCK FUNCTIONS ERRORS HANDLING MACROS ********** */
 
+
 /**
  * @brief Exits the current process if the pthread_rwlock_init fails.
  */   
 #define RWL_INIT(l, attr) \
 	do { \
-		if (pthread_rwlock_init((l), (attr)) != 0){ \
-			fprintf(stderr, "FATAL ERROR on rwlock initialization\n"); \
+		int r; \
+		if ((r = pthread_rwlock_init((l), (attr))) != 0){ \
+			errno = r; \
+			perror("FATAL ERROR on rwlock initialization"); \
 			exit(EXIT_FAILURE); \
 		} \
 	} while(0);
@@ -256,8 +272,10 @@
  */   
 #define RWL_DESTROY(l) \
 	do { \
-		if (pthread_rwlock_destroy(l) != 0){ \
-			fprintf(stderr, "FATAL ERROR on rwlock destruction\n"); \
+		int r; \
+		if ((r = pthread_rwlock_destroy(l)) != 0){ \
+			errno = r; \
+			perror("FATAL ERROR on rwlock destruction"); \
 			exit(EXIT_FAILURE); \
 		} \
 	} while(0);
@@ -268,8 +286,10 @@
  */   
 #define RWL_RDLOCK(l) \
 	do { \
-		if (pthread_rwlock_rdlock(l) != 0){ \
-			fprintf(stderr, "FATAL ERROR on rwlock read-locking\n"); \
+		int r; \
+		if ((r = pthread_rwlock_rdlock(l)) != 0){ \
+			errno = r; \
+			perror("FATAL ERROR on rwlock read-locking"); \
 			exit(EXIT_FAILURE); \
 		} \
 	} while(0);
@@ -280,8 +300,10 @@
  */   
 #define RWL_WRLOCK(l) \
 	do { \
-		if (pthread_rwlock_wrlock(l) != 0){ \
-			fprintf(stderr, "FATAL ERROR on rwlock write-locking\n"); \
+		int r; \
+		if ((r = pthread_rwlock_wrlock(l)) != 0){ \
+			errno = r; \
+			perror("FATAL ERROR on rwlock write-locking"); \
 			exit(EXIT_FAILURE); \
 		} \
 	} while(0);
@@ -292,8 +314,10 @@
  */   
 #define RWL_UNLOCK(l) \
 	do { \
-		if (pthread_rwlock_unlock(l) != 0){ \
-			fprintf(stderr, "FATAL ERROR on rwlock unlocking\n"); \
+		int r; \
+		if ((r = pthread_rwlock_unlock(l)) != 0){ \
+			errno = r; \
+			perror("FATAL ERROR on rwlock unlocking"); \
 			exit(EXIT_FAILURE); \
 		} \
 	} while(0);
@@ -363,17 +387,5 @@
 		} \
 	} while(0);
 
-
-/**
- * @brief Exits the current process if the pthread_mutex_trylock fails.
- */   
-static inline int TRYLOCK(pthread_mutex_t* l) {
-  int r=0;		
-  if ((r=pthread_mutex_trylock(l))!=0 && r!=EBUSY) {		    
-    fprintf(stderr, "ERRORE FATALE unlock\n");		    
-    exit(EXIT_FAILURE);			    
-  }								    
-  return r;	
-}
 
 #endif /* _DEFINES_H */
