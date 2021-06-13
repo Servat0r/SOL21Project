@@ -313,17 +313,14 @@ int readFile(const char* pathname, void** buf, size_t* size){
 
 
 /**
- * @brief Appends at most #size bytes of the content pointed by #buf to file #pathname.
- * If #dirname is NOT NULL and server sends back any expelled file (M_GETF), content is 
- * saved in folder pointed by #dirname by replicating the ENTIRE absolute path inside it,
- * else if #dirname is NULL, any file received by server is discarded.
- *
- * NOTE: For now the option to save file content in a directory is not supported, so
- * argument dirname is always treated as it was NULL.
- *
+ * @brief Appends at most size bytes of the content pointed by buf to file pathname.
+ * If dirname is NOT NULL and server sends back any expelled file (M_GETF) with
+ * (modified == true), content is saved in folder pointed by dirname by replicating
+ * the ENTIRE absolute path inside it, else if dirname is NULL, any file received
+ * by server is discarded.
  * @return 0 on success, -1 on error (errno set).
  * Possible errors are:
- * 	- EINVAL: at least one or #pathname, #buf or #dirname is NULL;
+ * 	- EINVAL: at least one or pathname, buf or dirname is NULL;
  *	- ENOMEM: unable to allocate memory to send request to server;
  *	- EBADMSG: wrong message received by server or EOF read by a mrecv before
  *		having received all current message content;
@@ -354,7 +351,7 @@ int appendToFile(const char* pathname, void* buf, size_t size, const char* dirna
 			res = 0;
 			break;
 		} else if (msg->type == M_GETF){
-			if (*msg->args[2].content == true){ /* File had O_DIRTY bit set and so it needs to be saved */
+			if (*((bool*)msg->args[2].content) == true){ /* File had O_DIRTY bit set and so it needs to be saved */
 				if (saveFile((const char*)msg->args[0].content, dirname, msg->args[1].content, msg->args[1].len) == -1){
 					perror("appendToFile:while saving received file");
 				}
@@ -374,18 +371,17 @@ int appendToFile(const char* pathname, void* buf, size_t size, const char* dirna
 
 
 /**
- * @brief Loads file identified by #pathname from disk and
- * writes all its content to the file storage server. This
- * operations succeeds iff the preceeding one on the same
- * file by the same client has been:
+ * @brief Loads file identified by #pathname from disk and writes all its 
+ * content to the file storage server. This operations succeeds iff the 
+ * preceeding (succeeding) one on the same file by the same client has been:
  *	openFile(pathname, O_CREATE | O_LOCK).
+ * @note Any received file from server (M_GETF) with (modified == true) is
+ * saved on disk in the folder dirname by replicating the ENTIRE absolute path.
  * @return 0 on success, -1 on error.
  * Possible errors are:
  *	- EINVAL: invalid arguments (pathname == NULL);
- *	- ENOMEM: unable to allocate memory for sending
- *	request to the server;
- *	- EBADMSG: bad message received from server (i.e.,
- *	bad message type or incomplete one);
+ *	- ENOMEM: unable to allocate memory for sending request to the server;
+ *	- EBADMSG: bad message received from server (i.e., bad message type or incomplete one);
  *	- EBADF: there is no active connection;
  *	- any error received from server (M_ERR received).
  */
@@ -417,7 +413,7 @@ int writeFile(const char* pathname, const char* dirname){
 			res = 0;
 			break;
 		} else if (msg->type == M_GETF){
-			if (*msg->args[2].content == true){ /* File had O_DIRTY bit set and so it needs to be saved */
+			if (*((bool*)msg->args[2].content) == true){ /* File had O_DIRTY bit set and so it needs to be saved */
 				if (saveFile((const char*)msg->args[0].content, dirname, msg->args[1].content, msg->args[1].len) == -1){
 					perror("writeFile:while saving received file");
 				}

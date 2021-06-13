@@ -23,38 +23,34 @@
 typedef struct fdata_s {
 
 	void* data; /* File content */
-	size_t size; /* Current file size */
-	
+	size_t size; /* Current file size */	
 	unsigned char flags; /* Global flags */
-	
 	unsigned char* clients; /* Byte array of client-local flags */
 	int maxclient; /* len(clients) - 1 */
-	
 	tsqueue_t* waiting; /* Waiting clients */
-	
 	pthread_rwlock_t lock; /* For reading/writing file content */
 
 } fdata_t;
 
 
 fdata_t*
-	fdata_create(int, int, bool); /* -> fss_create */
+	fdata_create(int maxclient, int creator, bool locking); /* -> fss_create */
 
 int
-	fdata_open(fdata_t*, int, bool), /* -> fss_open */
-	fdata_close(fdata_t*, int), /* -> fss_close */
+	fdata_open(fdata_t* fdata, int client, bool locking), /* -> fss_open */
+	fdata_close(fdata_t* fdata, int client), /* -> fss_close */
 	fdata_read(fdata_t* fdata, void** buf, size_t* size, int client, bool ign_open), /* -> fss_read */
-	fdata_write(fdata_t*, void*, size_t, int, bool), /* fss_write/fss_append */
-	fdata_lock(fdata_t*, int), /* (try)lock */
-	fdata_unlock(fdata_t*, int, llist_t** newowner), /* (try)unlock and returns new owner (if any) */
-	fdata_removeClient(fdata_t*, int, llist_t** newowner), /* removes all info of a set of clients */
+	fdata_write(fdata_t* fdata, void* buf, size_t size, int client, bool wr), /* fss_write/fss_append */
+	fdata_lock(fdata_t* fdata, int client), /* (try)lock */
+	fdata_unlock(fdata_t* fdata, int client, llist_t** newowner), /* (try)unlock and returns new owner (if any) */
+	fdata_removeClient(fdata_t* fdata, int client, llist_t** newowner), /* removes all info of a set of clients */
 	fdata_resize(fdata_t* fdata, int client); /* fss->resize */
 
 tsqueue_t*
-	fdata_waiters(fdata_t*);
+	fdata_waiters(fdata_t* fdata);
 	
 void
-	fdata_destroy(fdata_t*), /* Implicit usage of 'free' (it is ALL heap-allocated for this struct) */
-	fdata_printout(fdata_t*);
+	fdata_destroy(fdata_t* fdata), /* Implicit usage of 'free' (it is ALL heap-allocated for this struct) */
+	fdata_printout(fdata_t* fdata);
 	
 #endif /* _FDATA_H */

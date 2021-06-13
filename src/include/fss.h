@@ -2,12 +2,8 @@
  * @brief Definition of file storage system data structure.
  * fss_t is made up essentially by:
  *	- a hashtable that maps current used filenames to their respective fdata_t objects;
- *	- a linkedlist that contains filenames of any file inserted in the hashtable
- *		(the adding of a new file to hashtable and queue is done ATOMICALLY with respect to
- *		ANY other that could change any of these structures, i.e. other file creators/writers
- *		and threads executing the replacement function). Files in linkedlist are inserted in
- *		FIFO order and each time a file is removed its name is also removed: this is why the list
- *		is called 'replQueue';
+ *	- a FIFO concurrent queue that contains filenames of any file inserted in the hashtable.
+ *		Each time a file is removed its name is also removed.
  *	- a mutex used to execute write/append operations only ONE at a time: this is necessary to
  *		avoid multiple file writings such that each one does NOT exceed file/storage capacity,
  *		but together do. This mutex is used ONLY by these functions.
@@ -27,6 +23,7 @@
 #include <util.h>
 #include <icl_hash.h>
 #include <linkedlist.h>
+#include <tsqueue.h>
 #include <fdata.h>
 
 /* Flags for replacement algorithm */
@@ -55,15 +52,11 @@ typedef struct fss_s {
 	pthread_cond_t conds[2]; /* actives[i] == #{threads sospesi per un'operazione di tipo i} */	
 	int state; /* actives[i] == #{threads attivi su un'operazione di tipo i} */
 	int maxclient; /* (GLOBAL) maximum client number */
-	
 	pthread_mutex_t wlock; /* Lock per far accedere gli scrittori uno alla volta */
-		
 	int maxFileNo; /* Maximum number of storable files */
-
 	size_t storageCap; /* Storage capacity in KBytes */
 	tsqueue_t* replQueue; /* FIFO queue for tracing file(s) to remove */
 	size_t spaceSize; /* Current total size of the occupied space */
-	
 	/* Statistics members (la mutua esclusione è garantita dal fatto che sono tutti modificati da operazioni che settano active_cwr) */
 	int maxFileHosted; /* MAX(#file ospitati) */
 	int maxSpaceSize; /* MAX(#dimensione dello storage) */
@@ -78,40 +71,33 @@ fcontent_t*
 void
 	fcontent_destroy(fcontent_t* fc);
 
-
 int
 	/* Creation / Destruction */
 	fss_init(fss_t* fss, int nbuckets, size_t storageCap, int maxFileNo, int maxclient),
-	fss_destroy(fss_t* fss), //TODO Valutare se aggiungere anche qui un waitHandler come parametro
+	fss_destroy(fss_t* fss),
 
 	/* Modifying operations */
-	//TODO Valutare se aggiungere anche qui un sendBackHandler come parametro (per rispedire indietro i file espulsi)
 	fss_create(fss_t* fss, char* pathname, int creator, bool locking, int (*waitHandler)(tsqueue_t* waitQueue)),
-	/* newowners_list shall contain a list of ALL awaken clients that need to be notified */
-	fss_clientCleanup(fss_t*, int client, llist_t** newowners_list),
-	/* Here the caller KNOWS that the file is being removed and does NOT need to be notified via function parameter */
-	fss_remove(fss_t*, char* pathname, int client, int (*waitHandler)(tsqueue_t* waitQueue)),
-	/* GLOBAL resizing of fdata objects' clients-arrays such that ALL arrays have AT LEAST the specified size */
-	fss_resize(fss_t*, int newmax),
+	fss_clientCleanup(fss_t* fss, int client, llist_t** newowners_list),
+	fss_remove(fss_t* fss, char* pathname, int client, int (*waitHandler)(tsqueue_t* waitQueue)),
+	fss_resize(fss_t* fss, int newmax),
 	
 	/* Non-modifying operations that DO NOT call modifying ones */
 	fss_open(fss_t* fss, char* pathname, int client, bool locking),
-	fss_close(fss_t*, char* pathname, int client),
-	fss_read(fss_t*, char* pathname, void** buf, size_t*, int client),
-	fss_readN(fss_t*, int client, int N, llist_t* results),
+	fss_close(fss_t* fss, char* pathname, int client),
+	fss_read(fss_t* fss, char* pathname, void** buf, size_t*, int client),
+	fss_readN(fss_t* fss, int client, int N, llist_t** results),
 	
 	/* Non-modifying operations that COULD call modifying ones */
-	fss_write(fss_t*, char* pathname, void* buf, size_t size, int client, bool wr, 
+	fss_write(fss_t* fss, char* pathname, void* buf, size_t size, int client, bool wr,
 		int (*waitHandler)(tsqueue_t* waitQueue), int (*sendBackHandler)(void* content, size_t size, int cfd, bool modified)),
 	
 	/* Registrazione di cosa ogni thread vuole fare:
-	 * rop -> un'operazione che NON modifica l'insieme dei file presenti (ad es. open/close/read ma anche write/append perché queste NON aggiungono/rimuovono file)
-	 * wop -> un'operazione che PUO' modificare l'insieme dei file presenti (ad es. create/remove e la funzione di rimpiazzamento dei files)
-	 * wait -> un thread che vuole lockare un file si mette in attesa che il flag O_LOCK venga resettato per quel file
-	 * wakeup -> un thread che ha resettato O_LOCK su uno o più files notifica questa operazione a tutti i thread che hanno fatto una fss_wait e si sono bloccati
+	 * rop -> un'operazione che NON modifica l'insieme dei file presenti
+	 * (ad es. open/close/read ma anche write/append perché queste NON aggiungono/rimuovono file)
+	 * wop -> un'operazione che PUO' modificare l'insieme dei file presenti
+	 * (ad es. create/remove e la funzione di rimpiazzamento dei files)
 	 * chmod -> per passare da una rop a una wop e viceversa senza chiamare una _end e poi una _init.
-	 * Le operazioni fss_wait e fss_wakeup_end non necessitano di una successiva _end (provvedono a "deregistrarsi" e a notificarlo agli altri thread), per evitare
-	 * di dover acquisire e rilasciare due volte la stessa mutex 
 	*/
 	fss_rop_init(fss_t* fss),
 	fss_rop_end(fss_t* fss),
@@ -121,11 +107,11 @@ int
 	
 	/* Locking / Unlocking */
 	fss_lock(fss_t* fss, char* pathname, int client),
-	/* *newowner will point to an integer identifying the new file-lock owner, and will be NULL otherwise */
 	fss_unlock(fss_t* fss, char* pathname, int client, llist_t** newowner);
 
 
 void
+	/* Dumping */
 	fss_dumpfile(fss_t* fss, char* pathname), /* Equivalent to a fdata_printout to the file identified by 'pathname' */
 	fss_dumpAll(fss_t* fss); /* Dumps all files and storage info to stream */
 		

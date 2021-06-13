@@ -1,7 +1,6 @@
 #include <fss.h>
 
-
-/* ********************** STATIC OPERATIONS ********************** */
+/* ************************ FCONTENT OPERATIONS ********************** */
 
 /**
  * @brief Creates a fcontent_t object with content space already allocated.
@@ -36,8 +35,11 @@ void fcontent_destroy(fcontent_t* fc){
 }
 
 
+/* ********************** STATIC OPERATIONS ********************** */
+
 /**
- * @brief Creates a copy of #pathname for a new entry in the hashtable or in the replQueue.
+ * @brief Creates a copy of #pathname for a new entry in the hashtable or 
+ * in the replQueue.
  * @return 0 on success, -1 on error.
  * Possible errors are:
  *	- ENOMEM: unable to allocate memory.
@@ -54,18 +56,20 @@ static int make_entry(char* pathname, char** pathcopy){
 /**
  * @brief Searches in the hash table for the key 'pathname'.
  * @return 0 on success, -1 on error.
- * Possible errors are:
- *	- all errors by icl_hash_find.
  */
-static fdata_t* fss_search(fss_t* fss, char* pathname){ return icl_hash_find(fss->fmap, pathname); }
+static fdata_t* fss_search(fss_t* fss, char* pathname){
+	return icl_hash_find(fss->fmap, pathname);
+}
 
 
 /**
  * @brief Destroys current file and updates storage size of fss.
  * @param fdata -- Pointer to file object to destroy.
  * @param filename -- Absolute path of fdata as contained in fss->fmap.
- * @requires write lock on fdata and fss.
- * @return 0 on success, -1 on error.
+ * @note This function requires write lock on fss (this guarantees safe access
+ * to fdata->size).
+ * @return 0 on success, exits program otherwise (to not delete file is a fatal
+ * error that could lead to an inconsistent state).
  */
 static int fss_trash(fss_t* fss, fdata_t* fdata, char* filename){	
 	size_t fsize = fdata->size;
@@ -77,18 +81,29 @@ static int fss_trash(fss_t* fss, fdata_t* fdata, char* filename){
 
 /**
  * @brief Cache replacement algorithm.
- * @requires Write-lock on fss parameter.
+ * @note This function requires write-lock on fss parameter.
  * @param client -- Calling client identifier.
- * @param mode What to do: if (mode == R_CREATE), the algorithm will expel file(s) until the total number goes below #fss fileno capacity; if (mode == R_WRITE),
- * the algorithm will expel file(s) until the total space occupied by the remaining + #size goes below #fss storage capacity.
+ * @param mode -- What to do: if (mode == R_CREATE), the algorithm will expel
+ * file(s) until the total number goes below fss fileno capacity; otherwise,
+ * if (mode == R_WRITE), the algorithm will expel file(s) until the total
+ * space occupied by the remaining + size goes below fss storage capacity.
  * @param size -- Size of the file to write when using R_WRITE mode; it is ignored in R_CREATE mode.
- * @param waitHandler -- Pointer to function that handles files waiting queues by sending back the right messages to corresponding clients. It must be NOT NULL.
- * @param sendBackHandler -- Pointer to function that handles sending back content of a file to the calling client. If it is NULL, content is rejected.
- * @note waitHandler MUST NOT modify the queue and sendBackHandler MUST NOT modify file content and file size (they will be destroyed after).
- * @return 0 on success, -1 on error, 1 if there is no element in the queue or it is closed.
+ * @param waitHandler -- Pointer to function that handles files waiting queues
+ * by sending back the right messages to corresponding clients.
+ * @note waitHandler must be NOT NULL.
+ * @param sendBackHandler -- Pointer to function that handles sending back
+ * content of a file to the calling client using its connection file descriptor
+ * (cfd) and a boolean indicating whether the file has been modified or not 
+ * from its last creation in the filesystem.
+ * @note sendBackHandler can be NULL and if so content is rejected.
+ * @note waitHandler MUST NOT modify the queue and sendBackHandler MUST NOT 
+ * modify file content and file size (they will be destroyed after). Analogous
+ * requirement applies for sendBackHandler.
+ * @return 0 on success, -1 on error, 1 if there is no element in the queue or
+ * it is closed.
  * Possible errors are:
  *	- EINVAL: invalid arguments;
- *	- any error by llist_pop and icl_hash_find/delete.
+ *	- any error by llist_pop.
  */
 static int fss_replace(fss_t* fss, int client, int mode, size_t size, int (*waitHandler)(tsqueue_t* waitQueue), int (*sendBackHandler)(void* content, size_t size, int cfd, bool modified)){
 	if (!fss || !waitHandler || (client < 0) || (mode != R_CREATE && mode != R_WRITE)){ errno = EINVAL; return -1; }
@@ -129,10 +144,10 @@ static int fss_replace(fss_t* fss, int client, int mode, size_t size, int (*wait
 
 /* *********************************** REGISTRATION OPERATIONS ************************************* */
 
-
 /**
  * @brief Initializes a reading operation on the filesystem.
- * @return 0 on success, -1 on error.
+ * @return 0 on success, exits on error.
+ * @note This function does NOT change errno value. 
  */
 int fss_rop_init(fss_t* fss){
 	LOCK(&fss->gblock);
@@ -149,7 +164,8 @@ int fss_rop_init(fss_t* fss){
 
 /**
  * @brief Terminates a reading operation on the filesystem.
- * @return 0 on success, -1 on error.
+ * @return 0 on success, exits on error.
+ * @note This function does NOT change errno value. 
  */
 int fss_rop_end(fss_t* fss){
 	LOCK(&fss->gblock);
@@ -164,12 +180,12 @@ int fss_rop_end(fss_t* fss){
 
 
 /**
- * @brief Initializes a writing operation on the filesystem (i.e., it can modify which files are
- * stored inside).
- * @return 0 on success, -1 on error.
+ * @brief Initializes a writing operation on the filesystem (i.e., it can 
+ * modify which files are stored inside).
+ * @return 0 on success, exits on error.
+ * @note This function does NOT change errno value. 
  */
 int fss_wop_init(fss_t* fss){
-
 	LOCK(&fss->gblock);
 	int errno_copy = errno;
 	fss->waiters[1]++;
@@ -178,27 +194,23 @@ int fss_wop_init(fss_t* fss){
 	fss->state--;
 	errno = errno_copy;
 	UNLOCK(&fss->gblock);
-
 	return 0;
 }
 
 
 /**
  * @brief Terminates a writing operation on the filesystem.
- * @return 0 on success, -1 on error.
+ * @return 0 on success, exits on error.
+ * @note This function does NOT change errno value. 
  */
 int fss_wop_end(fss_t* fss){
-
 	LOCK(&fss->gblock);
 	int errno_copy = errno;
 	fss->state++;
-	
 	if (fss->waiters[1] > 0) { SIGNAL(&fss->conds[1]); }
 	else { BCAST(&fss->conds[0]); }
-	
 	errno = errno_copy;
 	UNLOCK(&fss->gblock);
-	
 	return 0;
 }
 
@@ -206,13 +218,12 @@ int fss_wop_end(fss_t* fss){
 /**
  * @brief Switches the current thread permissions from reading
  * to writing or viceversa, waiting until it can go.
- * @return 0 on success, -1 on error.
+ * @return 0 on success, exits on error.
+ * @note This function does NOT change errno value. 
  */
 int fss_op_chmod(fss_t* fss){
-
 	LOCK(&fss->gblock);
 	int errno_copy = errno;
-	
 	if (fss->state < 0) fss->state = 1; /* Changes from writer to reader */
 	else if (fss->state > 0){
 		fss->state--; /* Deletes itself as reader */
@@ -220,8 +231,7 @@ int fss_op_chmod(fss_t* fss){
 		while (fss->state != 0) WAIT(&fss->conds[1], &fss->gblock);
 		fss->waiters[1]--;
 		fss->state--; /* Changes from reader to writer */
-	}
-	
+	}	
 	errno = errno_copy;
 	UNLOCK(&fss->gblock);
 	return 0;
@@ -232,11 +242,16 @@ int fss_op_chmod(fss_t* fss){
 
 /**
  * @brief Initializes a fss_t object.
+ * @param nbuckets -- Number of buckets for the hashtable.
+ * @param storageCap -- Byte-size storage capacity of fss.
+ * @param maxFileNo -- File capacity of fss.
+ * @param maxclient -- Initial maximum client identifier accepted by fss.
  * @return 0 on success, -1 on error.
  * Possible errors are:
  *	- EINVAL: invalid arguments;
  *	- ENOMEM: unable to allocate internal data structures;
- *	- any error by pthread_mutex_init/destroy, by llist_init/destroy and by icl_hash_create.
+ *	- any error by pthread_mutex_init/destroy, by tsqueue_init/destroy and by
+ *	icl_hash_create.
  */
 int	fss_init(fss_t* fss, int nbuckets, size_t storageCap, int maxFileNo, int maxclient){
 	if (!fss || (storageCap == 0) || (maxFileNo == 0) || (nbuckets <= 0) || (maxclient < 0)){ errno = EINVAL; return -1; }
@@ -256,7 +271,6 @@ int	fss_init(fss_t* fss, int nbuckets, size_t storageCap, int maxFileNo, int max
 		errno = ENOMEM;
 		return -1;
 	}
-
 	fss->fmap = icl_hash_create(nbuckets, NULL, NULL);
 	if (!fss->fmap){
 		SYSCALL_EXIT(tsqueue_destroy(fss->replQueue, dummy), "fss_init: while destroying FIFO replacement queue after error on initialization");
@@ -270,9 +284,10 @@ int	fss_init(fss_t* fss, int nbuckets, size_t storageCap, int maxFileNo, int max
 
 
 /**
- * @brief Resizes client-array of ALL files at once such that ALL files would have their maxclient field >= newmax.
- * @param newmax -- New minimum value for maximum client identifier for ALL files.
- * @return 0 on success, -1 on error.
+ * @brief Resizes client-array of ALL files at once such that ALL files would
+ * have their maxclient field >= newmax.
+ * @param newmax -- New minimum value for maximum client id for ALL files.
+ * @return 0 on success, -1 on error, exits on error while resizing.
  * Possible errors are:
  *	- EINVAL: invalid arguments.
  */
@@ -297,15 +312,17 @@ int	fss_resize(fss_t* fss, int newmax){
 
 
 /**
- * @brief Creates a new file by initializing the first free entry in the fss->files array and adding the new mapping to the hash table.
- * @param maxclients -- Len of #clients field of the new fdata_t object.
+ * @brief Creates a new file by creating a new fdata_t object and putting it
+ * in the hashtable.
+ * @param maxclients -- Length of 'clients' field of the new fdata_t object.
  * @param client -- File descriptor of the creator.
  * @return 0 on success, -1 on error.
  * Possible errors are:
+ *	- EINVAL: invalid arguments (including a client identifier > the current
+ *	maximum: this is used for controlling maxclient field of fdata_t objects).
  *	- EEXIST: the file is already existing;
- *	- ENOMEM: unable to allocate memory;
- *	- any error by fss_replace, fss_search, fdata_create,
- *	make_entry, icl_hash_insert, llist_push. 
+ *	- any error by fss_replace, fss_search, fdata_create, make_entry,
+ * icl_hash_insert, tsqueue_push. 
  */
 int	fss_create(fss_t* fss, char* pathname, int client, bool locking, int (*waitHandler)(tsqueue_t* waitQueue)){
 	if (!fss){ errno = EINVAL; return -1; }
@@ -337,25 +354,21 @@ int	fss_create(fss_t* fss, char* pathname, int client, bool locking, int (*waitH
 			return -1;
 		}
 	}
-	
 	char* pathcopy1;
 	char* pathcopy2;
-	
 	/* Copies entries for inserting in hashtable and queue */
 	if (make_entry(pathname, &pathcopy1) == -1){
 		fdata_destroy(file); /* No one is waiting now */
 		fss_wop_end(fss);
 		return -1;
 	}
-	
 	if (make_entry(pathname, &pathcopy2) == -1){
 		fdata_destroy(file); /* No one is waiting now */
 		free(pathcopy1);
 		fss_wop_end(fss);
 		return -1;
 	}
-	
-	/* Inserts new file in the replQueue */ //TODO Correct replacement algorithm depends on this (should be better to refactor to standalone update)
+	/* Inserts new file in the replQueue */
 	if (tsqueue_push(fss->replQueue, pathcopy2) == -1){
 		fdata_destroy(file);
 		free(pathcopy1);
@@ -363,7 +376,6 @@ int	fss_create(fss_t* fss, char* pathname, int client, bool locking, int (*waitH
 		fss_wop_end(fss);
 		return -1;
 	}
-
 	/* Inserts new mapping in the hash table */
 	if (icl_hash_insert(fss->fmap, pathcopy1, file) == -1){
 		fdata_destroy(file);
@@ -375,10 +387,8 @@ int	fss_create(fss_t* fss, char* pathname, int client, bool locking, int (*waitH
 		fss_wop_end(fss);
 		return -1;
 	}
-	
 	/* Updates statistics */
 	if (bcreate) fss->maxFileHosted = MAX(fss->maxFileHosted, fss->fmap->nentries);
-
 	fss_wop_end(fss);
 	return ret;
 }
@@ -386,8 +396,11 @@ int	fss_create(fss_t* fss, char* pathname, int client, bool locking, int (*waitH
 
 /**
  * @brief Opens a file (without creation) for 'client'.
- * @return 0 on success, -1 on error.
+ * @param locking -- Boolean indicating if file shall be opened in locked mode.
+ * @return 0 on success, -1 on error, 1 if (locking == true) and file is
+ * already locked by another client.
  * Possible errors are:
+ *	- EINVAL: invalid arguments;
  *	- ENOENT: file not existing;
  *	- any error by fdata_open and fss_search.
  */
@@ -412,6 +425,7 @@ int	fss_open(fss_t* fss, char* pathname, int client, bool locking){
  * @brief Closes an open file for 'client'. 
  * @return 0 on success, -1 on error.
  * Possible errors are:
+ *	- EINVAL: invalid arguments;
  *	- ENOENT: file not existing;
  *	- any error by fdata_close and fss_search.
  */
@@ -433,9 +447,17 @@ int	fss_close(fss_t* fss, char* pathname, int client){
 
 /**
  * @brief Reads file 'pathname' into the pointer buf.
+ * @param buf -- Address of a (void*) variable that does NOT point to any
+ * already allocated memory (it shall be overwritten on success) and that 
+ * shall contain a copy of file content.
+ * @param size -- Address of a (size_t) variable that shall contain size of
+ * file content.
+ * @note On error, (*)buf and (*)size are NOT valid.
  * @return 0 on success, -1 on error.
  * Possible errors are:
+ *	- EINVAL: invalid arguments;
  *	- ENOENT: file not existing;
+ *	- EBUSY: file is locked by another client;
  *	- any error by fss_search and fdata_read.
  */
 int	fss_read(fss_t* fss, char* pathname, void** buf, size_t* size, int client){
@@ -455,15 +477,16 @@ int	fss_read(fss_t* fss, char* pathname, void** buf, size_t* size, int client){
 
 
 /**
- * @brief If N <= 0, reads ALL files in the server in that moment, else if N > 0 reads MIN(N, #{files in the server}) files and makes them available as
- * couples <size, content> in #results.
- * @param results -- An ALREADY initialized linkedlist of fcontent_t objects.
- * @return 0 on success, -1 on error.
+ * @brief If N <= 0, reads ALL files in the server in that moment, else if 
+ * N > 0 reads MIN(N, #{files in the server}) files and makes them available
+ * as couples <size, content> in results.
+ * @param results -- Pointer to an ALREADY initialized linkedlist of 
+ * fcontent_t objects.
+ * @return 0 on success, -1 on error, exits on fatal error.
  * Possible errors are:
- *	- EINVAL: invalid arguments;
- *	- ENOMEM: system out of memory.
+ *	- EINVAL: invalid arguments.
  */
-int	fss_readN(fss_t* fss, int client, int N, llist_t* results){
+int	fss_readN(fss_t* fss, int client, int N, llist_t** results){
 	if (!fss || !results || (client < 0)){ errno = EINVAL; return -1; }
 
 	int tmpint = 0;
@@ -473,7 +496,6 @@ int	fss_readN(fss_t* fss, int client, int N, llist_t* results){
 	fcontent_t* fc;
 	void* buf;
 	size_t size;
-
 	fss_rop_init(fss);
 	if ((N <= 0) || (N > fss->fmap->nentries)) N = fss->fmap->nentries;
 	int i = 0;
@@ -481,30 +503,40 @@ int	fss_readN(fss_t* fss, int client, int N, llist_t* results){
 		if (i >= N) break;
 		if (fdata_read(file, &buf, &size, client, true) != 0) continue;
 		CHECK_COND_EXIT((fc = fcontent_init(filename, size, buf)), "fss_readN: while creating struct for hosting file data\n");
-		SYSCALL_EXIT(llist_push(results, fc), "fss_readN: while pushing file data onto result list\n");
+		SYSCALL_EXIT(llist_push(*results, fc), "fss_readN: while pushing file data onto result list\n");
 		i++; /* File successfully read */
 	}
 	fss_rop_end(fss);
-	
 	return 0;
 }
 
 
 /**
  * @brief Appends content of buf to file 'pathname', or writes the entire file
- * content in buf to it. In the latter case, this functions fails if LF_WRITE is
- * not set for the calling client.
+ * content in buf to it. In the latter case, this functions fails if LF_WRITE
+ * is NOT set for the calling client.
+ * @param buf -- Pointer to memory area containing data to write.
+ * @param size -- byte-size of memory area poitned by buf.
+ * @param wr -- Boolean that distinguishes between higher-level writeFile and
+ * appendToFile in the client API: description is identical to the one in
+ * fdata_write.
+ * @param waitHandler -- Pointer to function that handles sending back messages
+ * to clients that are waiting on expelled files: description and constraints
+ * are identical to ones in fdata_write.
+ * @param sendBackHandler -- Pointer to function that handles sending back
+ * file content of expelled files; description and constraints are identical
+ * to ones in fdata_write.
  * @return 0 on success, -1 on error.
  * Possible errors are:
  *	- EINVAL: invalid arguments;
  *	- ENOENT: file not existing;
  *	- EFBIG: buffer size is greater than storage max capacity;
- *	- EBADF: when wr == true, file cannot be entirely written (i.e., LF_WRITE is
- *	not set for the calling client);
+ *	- EBADF: when wr == true, file cannot be entirely written (i.e., LF_WRITE
+ *	is NOT set for the calling client);
  *	- any error by fss_search and fdata_write.
  */
 int	fss_write(fss_t* fss, char* pathname, void* buf, size_t size, int client, bool wr,
-	int (*waitHandler)(tsqueue_t* waitQueue), int (*sendBackHandler)(void* content, size_t size, int cfd)){
+	int (*waitHandler)(tsqueue_t* waitQueue), int (*sendBackHandler)(void* content, size_t size, int cfd, bool modified)){
 	
 	if (!fss || !pathname || !buf || (size < 0) || (client < 0) || !waitHandler){ errno = EINVAL; return -1; }
 	bool bwrite;
@@ -558,12 +590,12 @@ int	fss_write(fss_t* fss, char* pathname, void* buf, size_t size, int client, bo
 
 
 /**
- * @brief Sets O_LOCK global flags to the file identified by #pathname
- * and LF_OWNER for #client. If LF_OWNER is already set then it returns
- * 0 immediately, else if O_LOCK is not set, it sets it and returns 0,
- * else it waits for the flag to become reset.
- * @return 0 on success, -1 on error.
+ * @brief Sets O_LOCK global flags to the file identified by #pathname and
+ * LF_OWNER for #client. If LF_OWNER is already set then it returns 0, else if
+ * O_LOCK is not set, it sets it and returns 0, else it returns 1.
+ * @return 0 on success, -1 on error, 1 if file is locked by another client.
  * Possible errors are:
+ * 	- EINVAL: invalid arguments;
  *	- ENOENT: file does not exist;
  *	- any error by fdata_lock and fss_search.
  */
@@ -571,21 +603,19 @@ int fss_lock(fss_t* fss, char* pathname, int client){
 	if (!fss || !pathname || (client < 0)){ errno = EINVAL; return -1; }
 	fdata_t* file;
 	int res;
-	
 	fss_rop_init(fss);		
 	file = fss_search(fss, pathname);
 	if (!file){ errno = ENOENT; return -1; }
 	res = fdata_lock(file, client);
 	fss_rop_end(fss);
-	
 	return res;
 }
 
 
 /**
- * @brief Resets the O_LOCK flag to the file identified by #pathname.
- * This operation completes successfully iff #client is the current
- * owner of the O_LOCK flag.
+ * @brief Resets the O_LOCK flag to the file identified by pathname. This
+ * operation completes successfully iff client is the current owner of the
+ * O_LOCK flag.
  * @return 0 on success, -1 on error, 1 if O_LOCK is not set or LF_OWNER
  * is not set for #client (i.e., calling client CANNOT unlock file).
  * Possible errors are:
@@ -612,12 +642,13 @@ int fss_unlock(fss_t* fss, char* pathname, int client, llist_t** newowner){
 
 /**
  * @brief Removes the file identified by #pathname from the file storage.
- * This operation succeeds iff O_LOCK flag is set #client is its current owner.
- * @return 0 on success, -1 on error, 1 if O_LOCK is not set or LF_OWNER is NOT
- * set for #client (i.e., calling client CANNOT remove file);
+ * This operation succeeds iff O_LOCK is set and client is its current owner.
+ * @return 0 on success, -1 on error, 1 if O_LOCK is not set or LF_OWNER is
+ * NOT set for client (i.e., calling client CANNOT remove file);
  * Possible errors are:
+ *	- EINVAL: invalid arguments;
  *	- ENOENT: file does not exist;
- *	- any error by fdata_trash, icl_hash_delete, fss_search.
+ *	- any error by fdata_trash, icl_hash_delete, fss_search, tsqueue_iter_*.
  */
 int fss_remove(fss_t* fss, char* pathname, int client, int (*waitHandler)(tsqueue_t* waitQueue)){
 	if (!fss || !pathname || (client < 0) || !waitHandler){ errno = EINVAL; return -1; }
@@ -653,35 +684,26 @@ int fss_remove(fss_t* fss, char* pathname, int client, int (*waitHandler)(tsqueu
 				break;
 			}
 		}
-		if (tsqueue_iter_end(fss->replQueue) == -1){ //FIXME Va messa qui??
+		SYSCALL_EXIT(tsqueue_iter_end(fss->replQueue), "fss_remove: while ending iteration on waiting queue");
+		if (res1 == -1){ /* Error on iteration, queue is untouched */
 			fss_wop_end(fss);
 			return -1;
 		}
-		if (res1 == -1){ /* Error on iteration */
-			fss_wop_end(fss);
-			return -1;
-		}		
 	} else ret = 1;
 	fss_wop_end(fss);
-
 	return ret;
 }
 
 
 /**
  * @brief Cleanups old data from a list of closed connections.
- * @param client -- An array of file descriptors
- * containing the connections to be cleaned up.
- * @param newowners -- An ALREADY initialized linkedlist in which
- * woken up clients shall be put in.
- * @param waiting -- An ALREADY initialized linkedlist in which
- * any client that is waiting for a lock will be put if file is
- * invalidated.
+ * @param newowners -- Pointer to an ALREADY initialized linkedlist in which
+ * woken up clients shall be put.
  * @return 0 on success, -1 on error.
  * Possible errors are:
  *	- EINVAL: invalid arguments.
  */
-int	fss_clientCleanup(fss_t* fss, int client, llist_t** newowners_list){ //TODO A waiting client is NOT interesting, because we cleanup ONLY closed connections
+int	fss_clientCleanup(fss_t* fss, int client, llist_t** newowners_list){
 	if (!fss || !newowners_list || (client < 0)) { errno = EINVAL; return -1; }
 	char* filename;
 	fdata_t* file;
@@ -690,7 +712,8 @@ int	fss_clientCleanup(fss_t* fss, int client, llist_t** newowners_list){ //TODO 
 	fss_wop_init(fss); /* Here there will NOT be any other using any file */
 	icl_hash_foreach(fss->fmap, tmpint, tmpent, filename, file){
 		/* If we don't get to remove all client metadata, there will be an inconsistent state in file */
-		SYSCALL_EXIT(fdata_removeClient(file, client, newowners_list), "fss_clientCleanup: while removing client metadata\n");
+		SYSCALL_EXIT(fdata_removeClient(file, client, newowners_list),
+			"fss_clientCleanup: while removing client metadata\n");
 	}
 	fss->cleanupCount++; /* Cleanup has been correctly executed */
 	fss_wop_end(fss);
@@ -699,13 +722,11 @@ int	fss_clientCleanup(fss_t* fss, int client, llist_t** newowners_list){ //TODO 
 
 
 /**
- * @brief Destroys the current fss_t object and frees
- * all resources.
+ * @brief Destroys the current fss_t object and frees all resources.
  * @return 0 on success, -1 on error.
  * Possible errors are:
  *	- EINVAL: invalid arguments;
- *	- any error by pthread_mutex_destroy, llist_destroy
- *	and icl_hash_destroy.
+ *	- any error by pthread_mutex_destroy, llist_destroy and icl_hash_destroy.
  */
 int	fss_destroy(fss_t* fss){
 	if (!fss){ errno = EINVAL; return -1; }
@@ -722,10 +743,9 @@ int	fss_destroy(fss_t* fss){
 
 
 /**
- * @brief Dumps the content of the file identified by
- * #pathname (i.e., all its metadata).
+ * @brief Dumps the content of the file identified by pathname.
  * Possible errors are:
- *	- EINVAL: at least one of #fss and #pathname is NULL;
+ *	- EINVAL: at least one between fss and pathname is NULL;
  *	- any error by fss_search.
  */
 void fss_dumpfile(fss_t* fss, char* pathname){ /* Equivalent to a fdata_printout to the file identified by 'pathname' */

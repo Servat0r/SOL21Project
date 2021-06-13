@@ -54,6 +54,10 @@ tsqueue_t* tsqueue_init(void){
 }
 
 
+/**
+ * @brief Opens queue for inserting new items.
+ * @return 0 on success, -1 on error.
+ */
 int tsqueue_open(tsqueue_t* q){
 	if (!q) return -1;
 	LOCK(&q->lock);
@@ -66,6 +70,10 @@ int tsqueue_open(tsqueue_t* q){
 }
 
 
+/**
+ * @brief Closes queue to avoid insertion of new items.
+ * @return 0 on success, -1 on error.
+ */
 int tsqueue_close(tsqueue_t* q){
 	if (!q) return -1;
 	LOCK(&q->lock);
@@ -80,7 +88,7 @@ int tsqueue_close(tsqueue_t* q){
 
 /**
  * @brief Puts the item 'elem' in the queue if it is open and there is NOT any active
- * producer / consumer. If queue is closed, exit immediately.
+ * producer / consumer / iteeation. If queue is closed, returns immediately.
  * @return 0 on success, -1 on error, a positive number otherwise made by one or more
  * QRET_* flags. In particular, flag QRET_CLOSED is ALWAYS available.
 */
@@ -127,15 +135,21 @@ int tsqueue_push(tsqueue_t* q, void* elem){
 
 /**
  * @brief Gets the next item in the queue if it is open and there is NOT
- * any active producer / consumer and makes param res point to it.
+ * any active producer / consumer / iteration and makes res point to it.
  * If queue is closed:
  *	- if empty, exits immediately;
  *	- otherwise, gets item normally.
- * @param res -- Pointer to extracted item (on success). NOTE: For memory
- * safety, res should NOT point to any previous data (i.e., res == &p, where
- * p : void* is a pointer to anything (otherwise it will be lost).
- * @return 0 on success, -1 on error, a positive number otherwise made by one or more QRET_* flags (and *res is set to NULL). 
- * In particular, flag QRET_CLOSED is ALWAYS available, while QRET_EMPTY is available ONLY on a nonblocking operation.
+ * This function could also be called in a "nonblocking" mode by passing
+ * true to nonblocking parameter: if so, the caller would not block if
+ * the queue is empty and NOT closed.
+ * @param res -- Pointer to extracted item (on success).
+ * @note For memory safety, res should NOT point to any previously allocated data.
+ * @param nonblocking -- Boolean to get "nonblocking" mode for empty queue
+ * (see above).
+ * @return 0 on success, -1 on error, a positive number otherwise
+ * made by one or more QRET_* flags (and *res is set to NULL). 
+ * In particular, flag QRET_CLOSED is ALWAYS available,
+ * while QRET_EMPTY is available ONLY on a nonblocking operation.
 */
 int tsqueue_pop(tsqueue_t* q, void** res, bool nonblocking){
 	if (!q) return -1;
@@ -169,7 +183,6 @@ int tsqueue_pop(tsqueue_t* q, void** res, bool nonblocking){
 	}
 	free(qn);
 	q->activePop = false;
-	/* TODO Is that okay?? */
 	if (q->waitIter > 0) { BCAST(&q->iterVar); }
 	else if (q->waitPush > 0) { BCAST(&q->pushVar); }
 	else { BCAST(&q->popVar); }
@@ -181,20 +194,20 @@ int tsqueue_pop(tsqueue_t* q, void** res, bool nonblocking){
 /**
  * @brief Returns a copy of the first N bytes of the first
  * element in the queue.
- * NOTE: This function works even if the queue is closed.
+ * @note This function works even if the queue is closed.
  * @param copyFun -- Function used to copy the element in the
  * queue (default memcpy).
  * @return Pointer to heap-allocated copy of the first element,
  * NULL on error or if the queue is empty.
  */
-void* tsqueue_getHead(tsqueue_t* q, void*(*copyFun)(void* restrict, void* restrict, size_t), size_t N){
+void* tsqueue_getHead(tsqueue_t* q, void*(*copyFun)(void* restrict dest, void* restrict src, size_t size), size_t N){
 	if (!q) return NULL;
 	LOCK(&q->lock);
 	if (tsqueue_isEmpty(q)) return NULL;
 	if (!copyFun){
 		size_t n = strlen(q->head->elem) + 1;
 		if (N > 0) N = MIN(N,n);
-		copyFun = memcpy;
+		copyFun = memmove;
 	} else if (N == 0) return NULL; /* No correct copy is possible */
 	void* p = malloc(N);
 	if (!p) return NULL;
@@ -356,10 +369,8 @@ int	tsqueue_iter_remove(tsqueue_t* q, void** elem){
  * @return 0 on success, -1 on error (invalid params).
  */
 int tsqueue_flush(tsqueue_t* q, void(*freeItems)(void*)){
-
 	if (!q) return -1;
 	if (!freeItems) freeItems = free;
-	
 	LOCK(&q->lock);
 	int n = tsqueue_size(q);
 	if (n > 0){
@@ -374,16 +385,14 @@ int tsqueue_flush(tsqueue_t* q, void(*freeItems)(void*)){
 		}
 	}
 	q->state = Q_CLOSED;
-	
 	BCAST(&q->pushVar);
 	BCAST(&q->popVar);
 	BCAST(&q->iterVar);
 	UNLOCK(&q->lock);
-	
 	return 0;
 }
 
-//FIXME Aggiustare!
+
 /**
  * @brief Destroys queue q by destroying all its mutexes and condVar and freeing queue itself if necessary.
  * @return 0 on success, -1 on error.

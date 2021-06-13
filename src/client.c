@@ -19,6 +19,10 @@ const optdef_t options[] = {
 		"scans recursively at most #num files from directory #dirname (or ALL files if #num <= 0 or it is not provided), and sends all found files to server"},
 
 	{"-W", 1, -1, allPaths, false, "filename[,filename]", "sends to server the provided filename(s) list"},
+	
+	{"-D", 1, 1, allPaths, false, "dirname",
+		"name of directory in which to save all (expelled) files received with options -w/-W; for each usage of this option, there MUST be a preceeding \
+-w/-W option, otherwise an error is raised; if this option is not specified at least once, all files received from server will be discarded"},
 
 	{"-r", 1, -1, allPaths, false, "filename[,filename]", "reads from server all files provided in the filename(s) list (if existing)"},
 
@@ -27,7 +31,7 @@ const optdef_t options[] = {
 
 	{"-d", 1, 1, allPaths, false, "dirname",
 		"name of directory in which to save all files read with options -r/-R; for each usage of this option, there MUST be a preceeding -r/-R option, \
-otherwise an error is raised; if this option is not specified at least once, all files read from server will be eliminated"},
+otherwise an error is raised; if this option is not specified at least once, all files read from server will be discarded"},
 
 	{"-t", 1, 1, allNumbers, true, "num", "Delay (in ms) between any subsequent requests to the server; if this option is NOT specified, there will be no delay"}, //TODO Temporarily true
 

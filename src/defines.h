@@ -252,6 +252,7 @@
 
 /* ********** RWLOCK FUNCTIONS ERRORS HANDLING MACROS ********** */
 
+/* ALL these macros set errno to the error code returned by the corresponding operation (if any) */
 
 /**
  * @brief Exits the current process if the pthread_rwlock_init fails.

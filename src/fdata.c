@@ -1,8 +1,7 @@
 #include <fdata.h>
 
-
 /**
- * @brief Utility macro for checking that client identifier is "in range"
+ * @brief Utility macro for checking that client identifier is "in range".
  */
 #define CHECK_MAXCLIENT(fdata, client, retval) \
 	do { \
@@ -13,26 +12,20 @@
 	} while (0);
 
 
-//TODO Se fallisce anche una sola volta:
-//Versione1: il server va in shutdown (pthread_kill(SIGQUIT, ...))
-//Versione3: non si invalida nulla, ma si restituisce "connection failed" (la fss_resize viene chiamata all'arrivo di una nuova connessione, il worker "prepara"
-//il server a eseguire richieste da quel client)
-//In generale, ogni file avrà un maxclient diverso per gestire questi edge-cases
 /**
- * @brief Resizes the current array of clients such that client can be inserted in.
- * @return 0 on success (client is suitable for current length, or fdata->clients has
- * been correctly realloc'd), -1 on error.
+ * @brief Resizes the current array of clients such that client can be
+ * inserted in.
+ * @return 0 on success (client is suitable for current length, or 
+ * fdata->clients has been correctly reallocated), -1 on error.
  * Possible errors are:
- *	- EINVAL: invalid arguments (fdata == NULL, client < 0);
- *	- ENOMEM (system out of memory, set by malloc);
+ *	- EINVAL: invalid arguments;
+ *	- ENOMEM (system out of memory, set by malloc).
  */
 int fdata_resize(fdata_t* fdata, int client){
 	if (!fdata || (client < 0)){ errno = EINVAL; return -1; }
-
 	int ret = 0; /* return value */
 	
-	RWL_WRLOCK(&fdata->lock);
-	
+	RWL_WRLOCK(&fdata->lock);	
 	if (client > fdata->maxclient){
 		unsigned char* ptr = realloc(fdata->clients, (client + 1) * sizeof(unsigned char));
 		if (!ptr){
@@ -46,14 +39,13 @@ int fdata_resize(fdata_t* fdata, int client){
 		}
 	}
 	RWL_UNLOCK(&fdata->lock);
-	
 	return ret;
 }
 
 
 /**
- * @brief Initializes a fdata_t object to contain an empty (closed) file and a (current) number of
- * possible opening clients of (maxclient + 1).
+ * @brief Initializes a fdata_t object to contain an empty (closed) file and a 
+ *(current) number of possible opening clients of (maxclient + 1).
  * @return Pointer to fdata_t object on success, NULL on error.
  * Possible errors are:
  *	- EINVAL: invalid arguments;
@@ -71,20 +63,16 @@ fdata_t* fdata_create(int maxclient, int creator, bool locking){ /* -> fss_creat
 	if (!fdata){
 		errno = ENOMEM;
 		return NULL;
-	} //TODO La connessione verrà chiusa dopo aver inviato un errore
-	
+	}
 	memset(fdata, 0, sizeof(fdata_t));
 	fdata->data = NULL;
 	fdata->size = 0;
-	
-	fdata->waiting = tsqueue_init();
-	
+	fdata->waiting = tsqueue_init();	
 	if (!fdata->waiting){
 		free(fdata);
 		errno = ENOMEM;
 		return NULL;
-	} //TODO La connessione verrà chiusa dopo aver inviato un errore
-	
+	}
 	fdata->clients = calloc(maxclient + 1, sizeof(unsigned char)); /* Already zeroed */
 	if (!fdata->clients){
 		/* If queue CANNOT be destroyed, we CANNOT avoid (at least) a memory leak */
@@ -92,33 +80,29 @@ fdata_t* fdata_create(int maxclient, int creator, bool locking){ /* -> fss_creat
 		free(fdata);
 		errno = ENOMEM;
 		return NULL;
-	} //TODO La connessione verrà chiusa dopo aver inviato un errore (se tsqueue_destroy NON fallisce)
+	}
 	fdata->maxclient = maxclient;
 	
 	RWL_INIT(&fdata->lock, NULL);
 	
 	/* Gives access to creator */
-	fdata->clients[creator] |= LF_OPEN;
-	
+	fdata->clients[creator] |= LF_OPEN;	
 	/* Gives ownership to creator if requested */
 	if (locking){
 		fdata->flags |= O_LOCK;
 		fdata->clients[creator] |= (LF_OWNER | LF_WRITE);
 	}
-
 	return fdata;
 }
 
-//FIXME Mi sembra NON ci sia una race condition a controllare (fdata == NULL), a meno che fdata_destroy non lo setti a NULL, ma se si toglie questo controllo è meglio
+
 /**
  * @brief Open fdata->data for client identified by client.
- * @return 0 on success, -1 on error, 1 if client has been suspended waiting for lock.
+ * @return 0 on success, -1 on error, 1 if client has been suspended waiting
+ * for lock.
  * Possible errors are:
- *	- EINVAL: invalid arguments (fdata == NULL, client < 0, client > fdata->maxclient);
- *	- EPERM: file not valid;
- *	- EBADF: file already open;
- *	- ENOMEM: unable to allocate memory;
- *	- any error by rwlock_write_*.
+ *	- EINVAL: invalid arguments;
+ *	- EBADF: file already open.
  */
 int fdata_open(fdata_t* fdata, int client, bool locking){ /* -> fss_open */
 
@@ -151,7 +135,6 @@ int fdata_open(fdata_t* fdata, int client, bool locking){ /* -> fss_open */
 			RWL_UNLOCK(&fdata->lock);
 		}
 	}
-	
 	return ret;
 }
 
@@ -160,10 +143,8 @@ int fdata_open(fdata_t* fdata, int client, bool locking){ /* -> fss_open */
  * @brief Closes the current file for client identified by #client param.
  * @return 0 on success, -1 on error.
  * Possible errors are:
- *	- EINVAL: invalid arguments (fdata == NULL, client < 0, client > fdata->maxclient);
- *	- EPERM: file not valid;
- *	- EBADF: file not open;
- *	- any error by rwlock_write_*.
+ *	- EINVAL: invalid arguments;
+ *	- EBADF: file not open.
  */
 int fdata_close(fdata_t* fdata, int client){ /* -> fss_close */
 	if (!fdata || (client < 0)){
@@ -172,9 +153,7 @@ int fdata_close(fdata_t* fdata, int client){ /* -> fss_close */
 	}
 	int ret = 0;
 	
-	
 	RWL_RDLOCK(&fdata->lock);
-	
 	CHECK_MAXCLIENT(fdata, client, &ret);
 	
 	if ((ret == 0) && (fdata->clients[client] & LF_OPEN)) fdata->clients[client] &= ~LF_OPEN; /* file closed */
@@ -186,23 +165,24 @@ int fdata_close(fdata_t* fdata, int client){ /* -> fss_close */
 	if (ret == 0) fdata->clients[client] &= ~LF_WRITE; /* A writeFile will fail */
 	
 	RWL_UNLOCK(&fdata->lock);
-		
-
 	return ret;
 }
 
 
 /**
- * @brief Copies file data (if any) into a buffer (usually returned to a fss_t object).
- * @param ign_open -- If true, then it is ignored whether the file is open or not (this is needed to implement readNFiles); otherwise, it is checked (normal read).
+ * @brief Copies file data (if any) into a buffer and writes size in #size.
+ * @param buf -- Address of a void* variable which does NOT references any
+ * heap-allocated memory, that shall contain copied data.
+ * @param size -- Address of a size_t variable that shall contain data size.
+ * @param ign_open -- If true, then it is ignored whether the file is open or 
+ * not (this is needed to implement readNFiles); otherwise, it is checked 
+ * (normal read).
  * @return 0 on success, -1 on error.
  * Possible errors are:
- *	- EINVAL: invalid arguments (fdata == NULL, client < 0, client > fdata->maxclient);
- *	- EPERM: file not valid;
- *	- EBADF: file not open;
- *	- ENOMEM: unablòe to allocate needed memory;
- *	- EBUSY: file is locked by another client;
- *	- any error by rwlock_read_*.
+ *	- EINVAL: invalid arguments;
+ *	- EBADF: (ign_open == false) and file not open;
+ *	- ENOMEM: unable to allocate needed memory;
+ *	- EBUSY: (ign_open == false) and file is locked by another client.
  */
 int fdata_read(fdata_t* fdata, void** buf, size_t* size, int client, bool ign_open){ /* -> fss_read */
 	if (!fdata || !buf || !size || (client < 0)){
@@ -243,23 +223,25 @@ int fdata_read(fdata_t* fdata, void** buf, size_t* size, int client, bool ign_op
 	if (ret == 0) fdata->clients[client] &= ~LF_WRITE; /* A writeFile will fail */
 
 	RWL_UNLOCK(&fdata->lock);
-		
-	
 	return ret;
 }
 
 
 /**
- * @brief Writes at most size bytes from the location pointed by buf by client.
+ * @brief Writes at most #size bytes from the location pointed by buf.
+ * @param buf -- Pointer to memory data to write on file.
+ * @param size -- Byte-size of data pointed by buf.
+ * @param wr -- Boolean for distinguish from higher-level writeFile/appendToFile
+ * functions provided in client API. If true, the function behaves as if a 
+ * writeFile has been called by the calling thread, otherwise it behaves as an
+ * appendToFile has been called by the calling thread.
  * @return 0 on success, -1 on error.
  * Possible errors are:
- *	- EINVAL: invalid arguments (fdata == NULL, client < 0, client > fdata->maxclient);
- *	- EPERM: file not valid;
- *	- EBADF: file not open or it is not possible to write in it
- *	(wr == true, i.e. a writeFile fails);
+ *	- EINVAL: invalid arguments;
+ *	- EBADF: file not open or it is not possible to write in it (wr == true,
+ *		i.e. a writeFile fails);
  *	- EBUSY: file is locked by another client;
- *	- ENOMEM: by malloc/realloc;
- *	- any error by rwlock_write_*.
+ *	- ENOMEM: by malloc/realloc.
  */
 int	fdata_write(fdata_t* fdata, void* buf, size_t size, int client, bool wr){
 
@@ -326,12 +308,12 @@ int	fdata_write(fdata_t* fdata, void* buf, size_t size, int client, bool wr){
 
 
 /**
- * @brief Sets O_LOCK flag to the current file. If O_LOCK is not set
- * or it is already owned by the calling client, it returns 0 immediately,
- * otherwise it returns 1.
+ * @brief Sets O_LOCK flag to the current file. If O_LOCK is not set or it is
+ * already owned by the calling client, it returns 0 immediately, otherwise 1.
  * @return 0 on success, -1 on error, 1 if file is already locked by another client.
  * Possible errors are:
- *	- EINVAL: invalid arguments (fdata == NULL, client < 0, client > fdata->maxclient);
+ *	- EINVAL: invalid arguments;
+ *	- ENOMEM: by malloc.
  */
 int fdata_lock(fdata_t* fdata, int client){
 	if (!fdata || (client < 0)){
@@ -340,9 +322,7 @@ int fdata_lock(fdata_t* fdata, int client){
 	}
 	int ret = 0; /* return value */
 	
-	
 	RWL_WRLOCK(&fdata->lock);
-	
 	CHECK_MAXCLIENT(fdata, client, &ret);
 	
 	if ((ret == 0) && (fdata->flags & O_LOCK) && !(fdata->clients[client] & LF_OWNER)){
@@ -369,23 +349,21 @@ int fdata_lock(fdata_t* fdata, int client){
 	
 	if (ret == 0) fdata->clients[client] &= ~LF_WRITE; /* A writeFile will fail */
 	RWL_UNLOCK(&fdata->lock);
-		
-	
 	return ret;
 }
 
 
 /**
- * @brief Resets O_LOCK flag to the current file. If file was not locked by the calling
- * client, it returns 1 immediately.
- * @param newowner -- Pointer to an integer where new lock onwer will be stored (if any).
- * @return 0 on success, -1 on (general) error, -2 if file has been invalidated,
- * 1 if file was not already locked by the calling client.
+ * @brief Resets O_LOCK flag to the current file. If file was not locked by
+ * the calling client, it returns 1 immediately.
+ * @param newowner -- Pointer to an ALREADY initialized linkedlist where new
+ * lock owner will be stored (if any).
+ * @return 0 on success, -1 on (general) error, 1 if file was not already
+ * locked by the calling client.
  * Possible errors are:
- *	- EINVAL: invalid arguments (fdata == NULL, client < 0, client > fdata->maxclient);
+ *	- EINVAL: invalid arguments.
  */
 int fdata_unlock(fdata_t* fdata, int client, llist_t** newowner){
-
 	if (!fdata || (client < 0) || !newowner){
 		errno = EINVAL;
 		return -1;
@@ -393,7 +371,6 @@ int fdata_unlock(fdata_t* fdata, int client, llist_t** newowner){
 
 	int ret = 0;	
 	int* n_own = NULL;
-	
 	
 	RWL_WRLOCK(&fdata->lock);
 	
@@ -414,8 +391,6 @@ int fdata_unlock(fdata_t* fdata, int client, llist_t** newowner){
 		
 	if (ret == 0) fdata->clients[client] &= ~LF_WRITE; /* A writeFile will fail */	
 	RWL_UNLOCK(&fdata->lock);
-		
-
 	return ret;
 }
 
@@ -423,12 +398,12 @@ int fdata_unlock(fdata_t* fdata, int client, llist_t** newowner){
 /**
  * @brief Removes all data of a client, i.e.:
  *	- clears all its local flags;
- *	- if it is owning lock on file, unlocks it;
- *	- if it is waiting on file, removes it from waiting list.
- * @return 0 on success, -1 on error, -2 if file is invalidated
- * during the process.
+ *	- if it is owning lock on file, unlocks it and assigns lock to the next
+ *	waiter if any, otherwise it releases it;
+ *	- if it is waiting on file lock, removes it from waiting queue.
+ * @return 0 on success, -1 on error.
  * Possible errors are:
- *	- EINVAL: invalid arguments (fdata == NULL, client < 0, client > fdata->maxclient);
+ *	- EINVAL: invalid arguments.
  */
 int fdata_removeClient(fdata_t* fdata, int client, llist_t** newowner){
 	if (!fdata || (client < 0) || !newowner){
@@ -437,14 +412,9 @@ int fdata_removeClient(fdata_t* fdata, int client, llist_t** newowner){
 	}
 	int ret = 0;
 	
-	
-	
-	RWL_RDLOCK(&fdata->lock);
-	
+	RWL_RDLOCK(&fdata->lock);	
 	CHECK_MAXCLIENT(fdata, client, &ret);
-	
 	if (ret == 0) fdata->clients[client] &= ~(LF_OPEN | LF_WRITE); /* These can be safely eliminated here */
-	
 	/*
 	All SYSCALL_EXIT below are done because an incorrect client-cleanup CANNOT guarantee a future consistent state of what any client
 	is doing (i.e., if client id can be recycled after a connection has been closed, there could be an inconsistent state).
@@ -466,26 +436,31 @@ int fdata_removeClient(fdata_t* fdata, int client, llist_t** newowner){
 		/* If (res1 == 1), iteration has ended without finding client in the waiting queue */
 		fdata->clients[client] &= ~LF_WAIT;
 		RWL_UNLOCK(&fdata->lock);
-		
 	} else if ((ret == 0) && (fdata->clients[client] & LF_OWNER)){
 		RWL_UNLOCK(&fdata->lock);
 		ret = fdata_unlock(fdata, client, newowner); /* ret will NEVER be 1 */
-		
 	} else RWL_UNLOCK(&fdata->lock); /* ret == -1 is included */
-	
-		
-	
 	return ret;
 }
 
-//FIXME Questa operazione porta problemi di "validità" del file se non eseguita in una wop dal fss
+
+/**
+ * @brief Extracts waiters queue from fdata_t object passed and makes it
+ * available to calling thread and unreachable from fdata_t object, to which it
+ * creates a new empty waiting queue.
+ * @note This method should be used only when destroying a file, as it can lead
+ * to inconsistency between clients and server.
+ * @return Ex-waiting queue of fdata on success, NULL on error and leaves
+ * waiting queue untouched.
+ * Possible errors are:
+ *	- EINVAL: invalid arguments.
+ */
 tsqueue_t* fdata_waiters(fdata_t* fdata){
 	if (!fdata){ errno = EINVAL; return NULL; }
 	
-	
 	RWL_WRLOCK(&fdata->lock);
 	tsqueue_t* waitQueue = fdata->waiting;
-	fdata->waiting = NULL;
+	SYSCALL_EXIT(fdata->waiting = tsqueue_init(), "fdata_waiters: while initializing new waiting queue");
 	for (int i = 0; i < fdata->maxclient; i++) fdata->clients[i] &= ~LF_WAIT;
 	RWL_UNLOCK(&fdata->lock);
 		
@@ -494,17 +469,13 @@ tsqueue_t* fdata_waiters(fdata_t* fdata){
 
 
 /**
- * @brief Removes file from file storage and cancels all its data.
- * @param waiting -- An ALREADY initialized linkedlist of all clients
- * waiting for the lock on this file.
- * Possible errors can be:
+ * @brief Removes file from file storage, deletes all its data.
+ * Possible errors are:
  *	- EINVAL (invalid arguments);
- *	- any error returned by rwlock_write_*.
  */
 void fdata_destroy(fdata_t* fdata){
 	if (!fdata){ errno = EINVAL; return; }
 	
-
 	RWL_WRLOCK(&fdata->lock);
 	if (fdata->clients){
 		free(fdata->clients);
@@ -521,20 +492,18 @@ void fdata_destroy(fdata_t* fdata){
 		fdata->waiting = NULL;
 	}
 	RWL_UNLOCK(&fdata->lock);
-
 	RWL_DESTROY(&fdata->lock);
-
-	free(fdata);
-		
+	free(fdata);		
 }
 
 
 /**
  * @brief Prints out all metadata and file content of the file.
+ * Possible errors are:
+ *	- EINVAL: invalid arguments.
  */
 void fdata_printout(fdata_t* fdata){
-	
-
+	if (!fdata){ errno = EINVAL; return; }
 	RWL_RDLOCK(&fdata->lock);
 	printf("fdata->size = %lu\n", fdata->size);
 	printf("fdata->flags = %d\n", fdata->flags);
@@ -549,6 +518,5 @@ void fdata_printout(fdata_t* fdata){
 	printf("\nfile content: \n");
 	write(1, fdata->data, fdata->size); /* Avoid invalid reads in absence of '\0' character */
 	printf("\n");
-	RWL_UNLOCK(&fdata->lock);
-		
+	RWL_UNLOCK(&fdata->lock);		
 }
