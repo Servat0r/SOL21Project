@@ -30,6 +30,18 @@
 #define R_CREATE 1
 #define R_WRITE 2
 
+/**
+ * @brief Enum that describes operation types:
+ *	- OP_READ: read-only operation on files and filesystem;
+ *	- OP_WRFILE: read-only operation on filesystem, read/write-operations on files;
+ *	- OP_WRSTOR: read-write operation on filesystem and files.
+ *	At any moment in time, there shall be:
+ *	- either ANY number of threads executing an OP_RD operation and 
+ *	at most ONE thread executing an OP_WRFILE operation;
+ *	- or ONLY ONE thread executing an OP_WRSTOR operation.
+ */
+typedef enum {OP_READ, OP_WRFILE, OP_WRSTOR } optype_t;
+
 
 /**
  * @brief Struct for hosting <size, content> couples for fs_readN.
@@ -47,16 +59,18 @@ typedef struct fcontent_s {
 typedef struct FileStorage_s {
 
 	icl_hash_t* fmap; /* Table of ALL current CORRECT mapping pathname->offset */
+
 	pthread_mutex_t gblock; /* mutex per ogni operazione di fs_rop_*, fs_wop_*, fs_lock/unlock */
 	int waiters[2]; /* waiters[i] == #{threads in attesa per un'operazione di tipo i} */
 	pthread_cond_t conds[2]; /* actives[i] == #{threads sospesi per un'operazione di tipo i} */	
 	int state; /* actives[i] == #{threads attivi su un'operazione di tipo i} */
+
 	int maxclient; /* (GLOBAL) maximum client number */
-	pthread_mutex_t wlock; /* Lock per far accedere gli scrittori uno alla volta */
 	int maxFileNo; /* Maximum number of storable files */
 	size_t storageCap; /* Storage capacity in KBytes */
 	tsqueue_t* replQueue; /* FIFO queue for tracing file(s) to remove */
 	size_t spaceSize; /* Current total size of the occupied space */
+
 	/* Statistics members (la mutua esclusione è garantita dal fatto che sono tutti modificati da operazioni che settano active_cwr) */
 	int maxFileHosted; /* MAX(#file ospitati) */
 	int maxSpaceSize; /* MAX(#dimensione dello storage) */
@@ -92,18 +106,24 @@ int
 	fs_write(FileStorage_t* fs, char* pathname, void* buf, size_t size, int client, bool wr,
 		int (*waitHandler)(tsqueue_t* waitQueue), int (*sendBackHandler)(void* content, size_t size, int cfd, bool modified)),
 	
-	/* Registrazione di cosa ogni thread vuole fare:
+	/**
+	 * @brief Registrazione di cosa ogni thread vuole fare:
 	 * rop -> un'operazione che NON modifica l'insieme dei file presenti
-	 * (ad es. open/close/read ma anche write/append perché queste NON aggiungono/rimuovono file)
+	 * (ad es. open/close/read)
 	 * wop -> un'operazione che PUO' modificare l'insieme dei file presenti
-	 * (ad es. create/remove e la funzione di rimpiazzamento dei files)
-	 * chmod -> per passare da una rop a una wop e viceversa senza chiamare una _end e poi una _init.
+	 * (ad es. create/remove/write/append e la funzione di rimpiazzamento dei files)
+	 * downgrade -> per passare atomicamente da una wop a una rop: tipicamente
+	 * usata da fs_write/fs_append dopo l'(eventuale) esecuzione dell'algoritmo
+	 * di rimpiazzamento per permettere altre operazioni "rop" concorrentemente
+	 * (e chiaramente nessuna "wop").
+	 * @note Questa "api" è di fatto equivalente a una read-write lock di tipo
+	 * writer-preferred con la possibilità per uno scrittore di "trasformarsi"
+	 * in lettore atomicamente.
 	*/
 	fs_rop_init(FileStorage_t* fs),
-	fs_rop_end(FileStorage_t* fs),
 	fs_wop_init(FileStorage_t* fs),
-	fs_wop_end(FileStorage_t* fs),
-	fs_op_chmod(FileStorage_t* fs),
+	fs_op_end(FileStorage_t* fs),
+	fs_op_downgrade(FileStorage_t* fs),
 	
 	/* Locking / Unlocking */
 	fs_lock(FileStorage_t* fs, char* pathname, int client),

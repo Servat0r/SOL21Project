@@ -144,6 +144,7 @@ static int fs_replace(FileStorage_t* fs, int client, int mode, size_t size, int 
 
 /* *********************************** REGISTRATION OPERATIONS ************************************* */
 
+
 /**
  * @brief Initializes a reading operation on the filesystem.
  * @return 0 on success, exits on error.
@@ -158,23 +159,6 @@ int fs_rop_init(FileStorage_t* fs){
 	fs->state++;
 	errno = errno_copy;
 	UNLOCK(&fs->gblock);
-	return 0;
-}
-
-
-/**
- * @brief Terminates a reading operation on the filesystem.
- * @return 0 on success, exits on error.
- * @note This function does NOT change errno value. 
- */
-int fs_rop_end(FileStorage_t* fs){
-	LOCK(&fs->gblock);
-	int errno_copy = errno;
-	fs->state--;
-	if ((fs->state == 0) && (fs->waiters[1] > 0)){ SIGNAL(&fs->conds[1]); }
-	else { BCAST(&fs->conds[0]); }
-	UNLOCK(&fs->gblock);
-	errno = errno_copy;
 	return 0;
 }
 
@@ -200,39 +184,44 @@ int fs_wop_init(FileStorage_t* fs){
 
 /**
  * @brief Terminates a writing operation on the filesystem.
- * @return 0 on success, exits on error.
+ * @return 0 on success, -1 on error (invalid request),
+ * exits on fatal error during mutex/condvar handling.
  * @note This function does NOT change errno value. 
  */
-int fs_wop_end(FileStorage_t* fs){
+int fs_op_end(FileStorage_t* fs){
+	int ret = 0;
 	LOCK(&fs->gblock);
-	int errno_copy = errno;
-	fs->state++;
-	if (fs->waiters[1] > 0) { SIGNAL(&fs->conds[1]); }
-	else { BCAST(&fs->conds[0]); }
-	errno = errno_copy;
+	if (fs->state == -1){
+		fs->state++;
+	} else if (fs->state > 0){
+		fs->state--;
+	} else ret = -1; /* Error */
+	if (ret == 0){
+		/* Wake up other waiting threads (if any) */
+		if ((fs->state == 0) && (fs->waiters[1] > 0)){ SIGNAL(&fs->conds[1]); } /* No reader/downgraded filewriter and at least one filewriter/fswriter waiting */
+		else if (fs->waiters[0] > 0){ BCAST(&fs->conds[0]); } /* At least one reader waiting */
+	}
 	UNLOCK(&fs->gblock);
 	return 0;
 }
 
 
 /**
- * @brief Switches the current thread permissions from reading
- * to writing or viceversa, waiting until it can go.
- * @return 0 on success, exits on error.
+ * @brief Switches the current thread permissions from writing to reading.
+ * @return 0 on success, -1 on error (request made when there is
+ * no active writer), exits on fatal error whila handling internal
+ * mutex or condition variable.
  * @note This function does NOT change errno value. 
  */
-int fs_op_chmod(FileStorage_t* fs){
+int fs_op_downgrade(FileStorage_t* fs){
 	LOCK(&fs->gblock);
-	int errno_copy = errno;
-	if (fs->state < 0) fs->state = 1; /* Changes from writer to reader */
-	else if (fs->state > 0){
-		fs->state--; /* Deletes itself as reader */
-		fs->waiters[1]++;
-		while (fs->state != 0) WAIT(&fs->conds[1], &fs->gblock);
-		fs->waiters[1]--;
-		fs->state--; /* Changes from reader to writer */
-	}	
-	errno = errno_copy;
+	/* Not writer */
+	if (fs->state >= 0){
+		UNLOCK(&fs->gblock);
+		return -1;
+	}
+	fs->state = 1; /* Changes from writer to reader */
+	if (fs->waiters[0] > 0){ BCAST(&fs->conds[0]); }
 	UNLOCK(&fs->gblock);
 	return 0;
 }
@@ -261,13 +250,11 @@ int	fs_init(FileStorage_t* fs, int nbuckets, size_t storageCap, int maxFileNo, i
 	fs->maxclient = maxclient;
 	
 	MTX_INIT(&fs->gblock, NULL);
-	MTX_INIT(&fs->wlock, NULL);
 	
 	fs->replQueue = tsqueue_init();
 	if (!fs->replQueue){
 		perror("While initializing FIFO replacement queue");
 		MTX_DESTROY(&fs->gblock);
-		MTX_DESTROY(&fs->wlock);
 		errno = ENOMEM;
 		return -1;
 	}
@@ -275,7 +262,6 @@ int	fs_init(FileStorage_t* fs, int nbuckets, size_t storageCap, int maxFileNo, i
 	if (!fs->fmap){
 		SYSCALL_EXIT(tsqueue_destroy(fs->replQueue, dummy), "fs_init: while destroying FIFO replacement queue after error on initialization");
 		MTX_DESTROY(&fs->gblock);
-		MTX_DESTROY(&fs->wlock);
 		errno = ENOMEM;
 		return -1;
 	}
@@ -297,16 +283,14 @@ int	fs_resize(FileStorage_t* fs, int newmax){
 	icl_entry_t* tmpent;
 	char* filename;
 	FileData_t* file;
-	fs_rop_init(fs);
+	fs_wop_init(fs);
 	if (fs->maxclient < newmax){
-		fs_op_chmod(fs); /* From "reader" to "writer" */
 		icl_hash_foreach(fs->fmap, tmpint, tmpent, filename, file){
 			SYSCALL_EXIT(fdata_resize(file, newmax), "fs_resize: while resizing file's client-array");
 		}
 		fs->maxclient = newmax;
-		fs_op_chmod(fs); /* From "writer" to "reader" */
 	}
-	fs_rop_end(fs);
+	fs_op_end(fs);
 	return 0;
 }
 
@@ -333,7 +317,7 @@ int	fs_create(FileStorage_t* fs, char* pathname, int client, bool locking, int (
 	fs_wop_init(fs);
 	file = fs_search(fs, pathname);
 	if (file){ /* File already existing */
-		fs_wop_end(fs);
+		fs_op_end(fs);
 		errno = EEXIST;
 		return -1;
 	} else {
@@ -342,14 +326,14 @@ int	fs_create(FileStorage_t* fs, char* pathname, int client, bool locking, int (
 			int repl = fs_replace(fs, client, R_CREATE, 0, waitHandler, NULL);
 			if (repl != 0){ /* Error while expelling files */
 				if (repl == -1) perror("While updating cache");
-				fs_wop_end(fs);
+				fs_op_end(fs);
 				return -1;
 			} else fs->replCount++; /* Cache replacement has been correctly executed */
 		} /* We don't need to repeat the search here */
 		file = fdata_create(maxclients, client, locking); /* Since this is a new file, it is automatically locked */
 		if (!file){
 			perror("While creating file");
-			fs_wop_end(fs);
+			fs_op_end(fs);
 			return -1;
 		}
 	}
@@ -358,13 +342,13 @@ int	fs_create(FileStorage_t* fs, char* pathname, int client, bool locking, int (
 	/* Copies entries for inserting in hashtable and queue */
 	if (make_entry(pathname, &pathcopy1) == -1){
 		fdata_destroy(file); /* No one is waiting now */
-		fs_wop_end(fs);
+		fs_op_end(fs);
 		return -1;
 	}
 	if (make_entry(pathname, &pathcopy2) == -1){
 		fdata_destroy(file); /* No one is waiting now */
 		free(pathcopy1);
-		fs_wop_end(fs);
+		fs_op_end(fs);
 		return -1;
 	}
 	/* Inserts new file in the replQueue */
@@ -372,7 +356,7 @@ int	fs_create(FileStorage_t* fs, char* pathname, int client, bool locking, int (
 		fdata_destroy(file);
 		free(pathcopy1);
 		free(pathcopy2);
-		fs_wop_end(fs);
+		fs_op_end(fs);
 		return -1;
 	}
 	/* Inserts new mapping in the hash table */
@@ -383,12 +367,12 @@ int	fs_create(FileStorage_t* fs, char* pathname, int client, bool locking, int (
 			free(pathcopy2);
 			exit(EXIT_FAILURE); /* We CANNOT avoid an incosistent state */
 		}
-		fs_wop_end(fs);
+		fs_op_end(fs);
 		return -1;
 	}
 	/* Updates statistics */
 	if (bcreate) fs->maxFileHosted = MAX(fs->maxFileHosted, fs->fmap->nentries);
-	fs_wop_end(fs);
+	fs_op_end(fs);
 	return ret;
 }
 
@@ -410,12 +394,12 @@ int	fs_open(FileStorage_t* fs, char* pathname, int client, bool locking){
 	fs_rop_init(fs);
 	file = fs_search(fs, pathname);
 	if (!file){ /* File not existing */
-		fs_rop_end(fs);
+		fs_op_end(fs);
 		errno = ENOENT;
 		return -1;
 	}
 	ret = fdata_open(file, client, locking);
-	fs_rop_end(fs);
+	fs_op_end(fs);
 	return ret;
 }
 
@@ -434,12 +418,12 @@ int	fs_close(FileStorage_t* fs, char* pathname, int client){
 	fs_rop_init(fs);
 	file = fs_search(fs, pathname);
 	if (!file){ /* File not existing */
-		fs_rop_end(fs);
+		fs_op_end(fs);
 		errno = ENOENT;
 		return -1;
 	}
 	int ret = fdata_close(file, client);
-	fs_rop_end(fs);
+	fs_op_end(fs);
 	return ret;
 }
 
@@ -466,11 +450,11 @@ int	fs_read(FileStorage_t* fs, char* pathname, void** buf, size_t* size, int cli
 	file = fs_search(fs, pathname);
 	if (!file){ /* File not existing */
 		errno = ENOENT;
-		fs_rop_end(fs);
+		fs_op_end(fs);
 		return -1;
 	}
 	int ret = fdata_read(file, buf, size, client, false);
-	fs_rop_end(fs);
+	fs_op_end(fs);
 	return ret;
 }
 
@@ -505,7 +489,7 @@ int	fs_readN(FileStorage_t* fs, int client, int N, llist_t** results){
 		SYSCALL_EXIT(llist_push(*results, fc), "fs_readN: while pushing file data onto result list\n");
 		i++; /* File successfully read */
 	}
-	fs_rop_end(fs);
+	fs_op_end(fs);
 	return 0;
 }
 
@@ -539,51 +523,43 @@ int	fs_write(FileStorage_t* fs, char* pathname, void* buf, size_t size, int clie
 	
 	if (!pathname || !buf || (size < 0) || (client < 0) || !waitHandler){ errno = EINVAL; return -1; }
 	bool bwrite;
-	LOCK(&fs->wlock);
-	fs_rop_init(fs);
+	fs_wop_init(fs);
 	FileData_t* file = fs_search(fs, pathname);
 	if (!file){ /* File not existing */
 		errno = ENOENT;
-		fs_rop_end(fs);
-		UNLOCK(&fs->wlock);
+		fs_op_end(fs);
 		return -1;
 	} else {
 		if (size > fs->storageCap){ /* Buffer too much big to be hosted in the storage */
 			errno = EFBIG;
-			fs_rop_end(fs);
-			UNLOCK(&fs->wlock);
+			fs_op_end(fs);
 			return -1;
 		}
 		bwrite = (fs->spaceSize + size > fs->storageCap); /* These values are NOT modified (only ONE modifier at a time) */
 		if (bwrite){
-			fs_op_chmod(fs); /* From "reader" to "writer" */
 			int repl = fs_replace(fs, client, R_WRITE, size, waitHandler, sendBackHandler);
 			if (repl != 0){ /* Error while expelling files */
 				if (repl == -1) perror("While updating cache");
-				fs_wop_end(fs);
-				UNLOCK(&fs->wlock);
+				fs_op_end(fs);
 				return -1;
 			} else fs->replCount++; /* Correct execution of cache replacement */
-			fs_op_chmod(fs); /* From "writer" to "reader" */
 		}
+		fs_op_downgrade(fs); /* From "writer" to "reader" */
 		/* Here we need to repeat the search because the file can have been expelled by the replacement algorithm */
 		file = fs_search(fs, pathname);
 		if (!file){
 			errno = ENOENT;
-			fs_rop_end(fs);
-			UNLOCK(&fs->wlock);
+			fs_op_end(fs);
 			return -1;
 		}
 	 	if (fdata_write(file, buf, size, client, wr) == -1){
 	 		perror("While writing on file");
-	 		fs_rop_end(fs);
- 			UNLOCK(&fs->wlock);
+	 		fs_op_end(fs);
  			return -1;
 	 	} else fs->spaceSize += size; /* La scrittura è andata a buon fine e aggiorniamo lo spazio totale occupato (nessun altro lo sta leggendo) */
 	 	fs->maxSpaceSize = MAX(fs->spaceSize, fs->maxSpaceSize); /* Updates statistics */
-		fs_rop_end(fs); /* Se non siamo usciti dalla funzione dobbiamo rilasciare la read-lock */
+		fs_op_end(fs); /* Se non siamo usciti dalla funzione dobbiamo rilasciare la read-lock */
 	}
-	UNLOCK(&fs->wlock);
 	return 0;
 }
 
@@ -606,7 +582,7 @@ int fs_lock(FileStorage_t* fs, char* pathname, int client){
 	file = fs_search(fs, pathname);
 	if (!file){ errno = ENOENT; return -1; }
 	res = fdata_lock(file, client);
-	fs_rop_end(fs);
+	fs_op_end(fs);
 	return res;
 }
 
@@ -629,12 +605,12 @@ int fs_unlock(FileStorage_t* fs, char* pathname, int client, llist_t** newowner)
 	fs_rop_init(fs);
 	file = fs_search(fs, pathname);
 	if (!file){
-		fs_rop_end(fs);
+		fs_op_end(fs);
 		errno = ENOENT;
 		return -1;
 	}
 	res = fdata_unlock(file, client, newowner); //FIXME La fdata_unlock NON si completa!
-	fs_rop_end(fs);
+	fs_op_end(fs);
 	return res;
 }
 
@@ -661,7 +637,7 @@ int fs_remove(FileStorage_t* fs, char* pathname, int client, int (*waitHandler)(
 	if (file->clients[client] & LF_OWNER){ /* File is locked by calling client */
 		waitQueue = fdata_waiters(file);
 		if (!waitQueue){
-			fs_wop_end(fs);
+			fs_op_end(fs);
 			return -1;
 		}
 		waitHandler(waitQueue);
@@ -677,7 +653,7 @@ int fs_remove(FileStorage_t* fs, char* pathname, int client, int (*waitHandler)(
 			if ( strequal(pathname, pathcopy) ){
 				if ((res2 = tsqueue_iter_remove(fs->replQueue, &pathcopy)) == -1){ /* queue is untouched */
 					tsqueue_iter_end(fs->replQueue);
-					fs_wop_end(fs);
+					fs_op_end(fs);
 					return -1;
 				} else if (res2 == 0) free(pathcopy);
 				break;
@@ -685,11 +661,11 @@ int fs_remove(FileStorage_t* fs, char* pathname, int client, int (*waitHandler)(
 		}
 		SYSCALL_EXIT(tsqueue_iter_end(fs->replQueue), "fs_remove: while ending iteration on waiting queue");
 		if (res1 == -1){ /* Error on iteration, queue is untouched */
-			fs_wop_end(fs);
+			fs_op_end(fs);
 			return -1;
 		}
 	} else ret = 1;
-	fs_wop_end(fs);
+	fs_op_end(fs);
 	return ret;
 }
 
@@ -715,7 +691,7 @@ int	fs_clientCleanup(FileStorage_t* fs, int client, llist_t** newowners_list){
 			"fs_clientCleanup: while removing client metadata\n");
 	}
 	fs->cleanupCount++; /* Cleanup has been correctly executed */
-	fs_wop_end(fs);
+	fs_op_end(fs);
 	return 0;
 }
 
@@ -732,7 +708,6 @@ int	fs_destroy(FileStorage_t* fs){
 
 	SYSCALL_EXIT(icl_hash_destroy(fs->fmap, free, fdata_destroy), "fs_destroy: while destroying file-hashtable");
 	MTX_DESTROY(&fs->gblock);
-	MTX_DESTROY(&fs->wlock);
 	
 	tsqueue_destroy(fs->replQueue, free);
 	
@@ -757,7 +732,7 @@ void fs_dumpfile(FileStorage_t* fs, char* pathname){ /* Equivalent to a fdata_pr
 		printf("File '%s':\n", pathname);
 		fdata_printout(file);
 	}
-	fs_rop_end(fs);	
+	fs_op_end(fs);	
 }
 
 
@@ -792,5 +767,5 @@ void fs_dumpAll(FileStorage_t* fs){ /* Dumps all files and storage info */
 	printf("fs_dump: client info cleanup executions = %d\n", fs->cleanupCount);
 	printf("fs_dump: end");
 	printf("\n***********************************\n");
-	fs_wop_end(fs);	
+	fs_op_end(fs);	
 }
