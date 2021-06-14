@@ -7,7 +7,7 @@ int main(int argc, char* argv[]){
 	void *buf1, *buf2, *buf3;
 	size_t size;
 	int fd = open(argv[1], O_RDONLY); /* Open disk file (and virtually connection) */
-	fdata_t* fdata;
+	FileData_t* fdata;
 	fdata = fdata_create(128, fd, false);
 	assert(fdata);
 	buf1 = malloc(1024);

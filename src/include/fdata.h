@@ -1,5 +1,5 @@
 /**
- * @brief File metadata for usage by the file storage system (fss_t) for memorizing all relevant information.
+ * @brief File metadata for usage by the file storage system (FileStorage_t) for memorizing all relevant information.
  *
  * @author Salvatore Correnti
  */
@@ -20,7 +20,7 @@
 #define LF_WAIT 8 /* Client is waiting for lock on this file */
 
 
-typedef struct fdata_s {
+typedef struct FileData_s {
 
 	void* data; /* File content */
 	size_t size; /* Current file size */	
@@ -30,27 +30,27 @@ typedef struct fdata_s {
 	tsqueue_t* waiting; /* Waiting clients */
 	pthread_rwlock_t lock; /* For reading/writing file content */
 
-} fdata_t;
+} FileData_t;
 
 
-fdata_t*
+FileData_t*
 	fdata_create(int maxclient, int creator, bool locking); /* -> fss_create */
 
 int
-	fdata_open(fdata_t* fdata, int client, bool locking), /* -> fss_open */
-	fdata_close(fdata_t* fdata, int client), /* -> fss_close */
-	fdata_read(fdata_t* fdata, void** buf, size_t* size, int client, bool ign_open), /* -> fss_read */
-	fdata_write(fdata_t* fdata, void* buf, size_t size, int client, bool wr), /* fss_write/fss_append */
-	fdata_lock(fdata_t* fdata, int client), /* (try)lock */
-	fdata_unlock(fdata_t* fdata, int client, llist_t** newowner), /* (try)unlock and returns new owner (if any) */
-	fdata_removeClient(fdata_t* fdata, int client, llist_t** newowner), /* removes all info of a set of clients */
-	fdata_resize(fdata_t* fdata, int client); /* fss->resize */
+	fdata_open(FileData_t* fdata, int client, bool locking), /* -> fss_open */
+	fdata_close(FileData_t* fdata, int client), /* -> fss_close */
+	fdata_read(FileData_t* fdata, void** buf, size_t* size, int client, bool ign_open), /* -> fss_read */
+	fdata_write(FileData_t* fdata, void* buf, size_t size, int client, bool wr), /* fss_write/fss_append */
+	fdata_lock(FileData_t* fdata, int client), /* (try)lock */
+	fdata_unlock(FileData_t* fdata, int client, llist_t** newowner), /* (try)unlock and returns new owner (if any) */
+	fdata_removeClient(FileData_t* fdata, int client, llist_t** newowner), /* removes all info of a set of clients */
+	fdata_resize(FileData_t* fdata, int client); /* fss->resize */
 
 tsqueue_t*
-	fdata_waiters(fdata_t* fdata);
+	fdata_waiters(FileData_t* fdata);
 	
 void
-	fdata_destroy(fdata_t* fdata), /* Implicit usage of 'free' (it is ALL heap-allocated for this struct) */
-	fdata_printout(fdata_t* fdata);
+	fdata_destroy(FileData_t* fdata), /* Implicit usage of 'free' (it is ALL heap-allocated for this struct) */
+	fdata_printout(FileData_t* fdata);
 	
 #endif /* _FDATA_H */

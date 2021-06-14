@@ -1,6 +1,6 @@
 #include <defines.h>
 #include <tsqueue.h>
-#include <fss.h>
+#include <fs.h>
 #include <assert.h>
 
 #define MAXCLIENTS 16
@@ -14,7 +14,7 @@
 
 #define __DEBUG
 
-fss_t fss;
+FileStorage_t fs;
 
 pthread_mutex_t mtx = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
@@ -22,17 +22,17 @@ pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
 /*
 Test cases:
 	1. A single thread tests: create - open failure - append - append - read - close,
-		then writes on stdout: a) buffer, b) fss_dumpfile; then exits
+		then writes on stdout: a) buffer, b) fs_dumpfile; then exits
 	2. Two threads work on the SAME file as above as different clients and test:
 		create failure - open (+ resize for both) - read - append / append - read,
-		then write on stdout: buffer; threadMain writes on stdout: a) fss_dumpfile,
-		then tests fss_clientCleanup and writes: fss_dumpall (test if correctly
+		then write on stdout: buffer; threadMain writes on stdout: a) fs_dumpfile,
+		then tests fs_clientCleanup and writes: fs_dumpall (test if correctly
 		cleanups clients info).
 	3. Four threads create 4 other files such that cache (writing) replacement
-		takes up and close; threadMain then writes: fss_dumpall.
+		takes up and close; threadMain then writes: fs_dumpall.
 	4. Two threads create 10 other files such that cache (creating) replacement
-		takes up and close; threadMain then writes: fss_dumpall.
-	5. A single thread does a fss_readN of all files on the server and prints all
+		takes up and close; threadMain then writes: fs_dumpall.
+	5. A single thread does a fs_readN of all files on the server and prints all
 		their content on stdout.
 	6. A single thread creates and "uploads" a file with STR2 and exits.
 		Then, three threads try to lock that file and write a string before unlocking.
@@ -55,12 +55,12 @@ void* firstTest(struct arg_s* arg){
 	char inbuf[] = "Servator1";
 	char* buf;
 	size_t size;
-	assert(fss_create(&fss, arg->pathname, arg->who, false, &whandler_stub) == 0);
-	assert(fss_open(&fss, arg->pathname, arg->who, false) == -1);
-	assert(fss_write(&fss, arg->pathname, inbuf, 9, arg->who, false, &whandler_stub, &sbhandler_stub) == 0);
-	assert(fss_write(&fss, arg->pathname, inbuf, 9, arg->who, false, &whandler_stub, &sbhandler_stub) == 0);
-	assert(fss_read(&fss, arg->pathname, &buf, &size, arg->who) == 0);
-	assert(fss_close(&fss, arg->pathname, arg->who) == 0);
+	assert(fs_create(&fs, arg->pathname, arg->who, false, &whandler_stub) == 0);
+	assert(fs_open(&fs, arg->pathname, arg->who, false) == -1);
+	assert(fs_write(&fs, arg->pathname, inbuf, 9, arg->who, false, &whandler_stub, &sbhandler_stub) == 0);
+	assert(fs_write(&fs, arg->pathname, inbuf, 9, arg->who, false, &whandler_stub, &sbhandler_stub) == 0);
+	assert(fs_read(&fs, arg->pathname, &buf, &size, arg->who) == 0);
+	assert(fs_close(&fs, arg->pathname, arg->who) == 0);
 	if (write(1, buf, size) == -1) perror("write");
 	free(buf);
 	return NULL;
@@ -72,21 +72,21 @@ void* secondTest(struct arg_s* arg){
 	char inbuf[] = "Servator2";
 	char* buf;
 	size_t size;
-	assert(fss_create(&fss, arg->pathname, arg->who, false, &whandler_stub) == -1);
+	assert(fs_create(&fs, arg->pathname, arg->who, false, &whandler_stub) == -1);
 	
 	pthread_mutex_lock(&mtx);
-	if (fss_open(&fss, arg->pathname, arg->who, false) == -1) perror("fss_open"); /* One will success and the other will give the 'EBADF' error */
+	if (fs_open(&fs, arg->pathname, arg->who, false) == -1) perror("fs_open"); /* One will success and the other will give the 'EBADF' error */
 	pthread_mutex_unlock(&mtx);
 	
-	assert(fss_write(&fss, arg->pathname, inbuf, 9, arg->who, false, &whandler_stub, &sbhandler_stub) == 0);
-	assert(fss_read(&fss, arg->pathname, &buf, &size, arg->who) == 0);
+	assert(fs_write(&fs, arg->pathname, inbuf, 9, arg->who, false, &whandler_stub, &sbhandler_stub) == 0);
+	assert(fs_read(&fs, arg->pathname, &buf, &size, arg->who) == 0);
 
 	pthread_mutex_lock(&mtx);
 	if (write(1, buf, size) == -1) perror("write");
 	printf("\n");
 	pthread_mutex_unlock(&mtx);
 
-	fss_dumpfile(&fss, arg->pathname);
+	fs_dumpfile(&fs, arg->pathname);
 	free(buf);
 	return NULL;
 }
@@ -97,11 +97,11 @@ void* thirdTest(struct arg_s* arg){
 	char inbuf[] = STRING;
 	char* buf;
 	size_t size;
-	assert(fss_create(&fss, arg->pathname, arg->who, false, &whandler_stub) == 0);
-	assert(fss_open(&fss, arg->pathname, arg->who, false) == -1);
-	assert(fss_write(&fss, arg->pathname, inbuf, 135, arg->who, false, &whandler_stub, &sbhandler_stub) == 0);
-	assert(fss_read(&fss, arg->pathname, &buf, &size, arg->who) == 0);
-	fss_close(&fss, arg->pathname, arg->who);
+	assert(fs_create(&fs, arg->pathname, arg->who, false, &whandler_stub) == 0);
+	assert(fs_open(&fs, arg->pathname, arg->who, false) == -1);
+	assert(fs_write(&fs, arg->pathname, inbuf, 135, arg->who, false, &whandler_stub, &sbhandler_stub) == 0);
+	assert(fs_read(&fs, arg->pathname, &buf, &size, arg->who) == 0);
+	fs_close(&fs, arg->pathname, arg->who);
 	free(buf);
 	return NULL;
 }
@@ -109,9 +109,9 @@ void* thirdTest(struct arg_s* arg){
 
 /** @brief Fourth testcase thread function */
 void* fourthTest(struct arg_s* arg){
-	assert(fss_create(&fss, arg->pathname, arg->who, false, &whandler_stub) == 0);
-	printf("fss_create successfully completed by arg->who == %d\n", arg->who);
-	assert(fss_close(&fss, arg->pathname, arg->who) == 0);
+	assert(fs_create(&fs, arg->pathname, arg->who, false, &whandler_stub) == 0);
+	printf("fs_create successfully completed by arg->who == %d\n", arg->who);
+	assert(fs_close(&fs, arg->pathname, arg->who) == 0);
 	printf("arg->who == %d exiting...\n\n", arg->who);
 	return NULL;
 }
@@ -122,7 +122,7 @@ void* fifthTest(void* arg){
 	llistnode_t* node;
 	fcontent_t* fc;
 	assert((results = llist_init()));
-	assert(fss_readN(&fss, 0, 0, &results) == 0);
+	assert(fs_readN(&fs, 0, 0, &results) == 0);
 	printf("fifth_test: begin\n");
 	llist_foreach(results, node){
 		fc = (fcontent_t*)node->datum;
@@ -142,14 +142,14 @@ void* sixthTest_createwrite(void* arg){
 	char* filename = (char*)arg;
 	llist_t* newowner;
 	assert((newowner = llist_init()));
-	assert(fss_create(&fss, filename, 0, true, &whandler_stub) == 0); /* File is locked */
-	assert(fss_write(&fss, filename, STR2, 82, 0, true, &whandler_stub, &sbhandler_stub) == 0); /* Write content */
-	assert(fss_unlock(&fss, filename, 0, &newowner) == 0);
-	//assert(fss_remove(&fss, filename, 0, &whandler_stub) == -1);
+	assert(fs_create(&fs, filename, 0, true, &whandler_stub) == 0); /* File is locked */
+	assert(fs_write(&fs, filename, STR2, 82, 0, true, &whandler_stub, &sbhandler_stub) == 0); /* Write content */
+	assert(fs_unlock(&fs, filename, 0, &newowner) == 0);
+	//assert(fs_remove(&fs, filename, 0, &whandler_stub) == -1);
 	printf("newowner_size = %d\n", newowner->size);
 	if (newowner->size > 0) printf("newowner_clientId = %d\n", newowner->head->datum);
-	assert(fss_close(&fss, filename, 0) == 0);
-	assert(fss_clientCleanup(&fss, 0, &newowner) == 0);
+	assert(fs_close(&fs, filename, 0) == 0);
+	assert(fs_clientCleanup(&fs, 0, &newowner) == 0);
 	assert(llist_destroy(newowner, free) == 0);
 	printf("sixthTest - exiting\n");
 	return NULL;
@@ -163,23 +163,23 @@ void* sixthTest_locking(void* arg){
 	llist_t* newowner;
 	assert((newowner = llist_init()));
 	int ret;
-	assert((ret = fss_open(&fss, filename, id, true)) >= 0);
+	assert((ret = fs_open(&fs, filename, id, true)) >= 0);
 
 	pthread_mutex_lock(&mtx);
 	if (ret == 1) waitClients[id]++; /* Client waiting */
 	while (waitClients[id] > 0) { printf("%d waiting\n", id); pthread_cond_wait(&cond, &mtx); }
 	if (ret == 1){
-		ret = fss_open(&fss, filename, id, true);
-		if (ret < 0) perror("fss_open[locking]");
+		ret = fs_open(&fs, filename, id, true);
+		if (ret < 0) perror("fs_open[locking]");
 	}
 	pthread_mutex_unlock(&mtx);
 
-	assert(fss_write(&fss, filename, "@A@", 3, id, false, &whandler_stub, &sbhandler_stub) == 0);
-	assert(fss_close(&fss, filename, id) == 0);
+	assert(fs_write(&fs, filename, "@A@", 3, id, false, &whandler_stub, &sbhandler_stub) == 0);
+	assert(fs_close(&fs, filename, id) == 0);
 	llistnode_t* node;
 	int* datum;
 
-	assert(fss_clientCleanup(&fss, id, &newowner) == 0);
+	assert(fs_clientCleanup(&fs, id, &newowner) == 0);
 	
 	pthread_mutex_lock(&mtx);
 	printf("newowners list size = %lu [client %d]\n", newowner->size, id);
@@ -224,13 +224,13 @@ int main(void){
 	
 	for (int i = 0; i < 3; i++){ args6[i].who = i+1; args6[i].pathname = LOREM_IPSUM; args6[i].waitClients = waitClients;}
 
-	assert(fss_init(&fss, 4, 512, 6, 24) == 0); /* 1/2 KB capacity, 6 maxFileNo and 25 possible clients (0-24) */
+	assert(fs_init(&fs, 4, 512, 6, 24) == 0); /* 1/2 KB capacity, 6 maxFileNo and 25 possible clients (0-24) */
 
 	/* First test */
 	printf("\nFIRST TEST RESULT:\n");
 	pthread_create(&p[0], NULL, firstTest, &args1_2);
 	pthread_join(p[0], NULL);
-	fss_dumpAll(&fss);
+	fs_dumpAll(&fs);
 
 	/* Second test */
 	printf("\nSECOND TEST RESULT:\n");
@@ -241,30 +241,30 @@ int main(void){
 	pthread_join(p[1], NULL);
 	llist_t* l = llist_init();
 	assert(l != NULL);
-	fss_clientCleanup(&fss, 1, &l);
+	fs_clientCleanup(&fs, 1, &l);
 	printf("newowners_list size = %lu\n", l->size);
 	llist_destroy(l, free);
-	fss_dumpAll(&fss);
+	fs_dumpAll(&fs);
 
 	/* Third test */
 	printf("\nTHIRD TEST RESULT:\n");
 	for (int i = 0; i < 4; i++) pthread_create(&p[i], NULL, thirdTest, &args3[i]);
 	for (int i = 0; i < 4; i++) pthread_join(p[i], NULL);	
-	fss_dumpAll(&fss);
-	assert(fss.fmap->nentries == 3); /* The last file inserted should have expelled the first two */
+	fs_dumpAll(&fs);
+	assert(fs.fmap->nentries == 3); /* The last file inserted should have expelled the first two */
 	
 	/* Fourth test */
 	printf("\nFOURTH TEST RESULT:\n");
 	for (int i = 0; i < 4; i++) pthread_create(&p[i], NULL, fourthTest, &args4[i]);
 	for (int i = 0; i < 4; i++) pthread_join(p[i], NULL);	
-	assert(fss.fmap->nentries == 6); /* File capacity should have been reached and one file rejected */
-	fss_dumpAll(&fss);
+	assert(fs.fmap->nentries == 6); /* File capacity should have been reached and one file rejected */
+	fs_dumpAll(&fs);
 
 	/* Fifth test */
 	printf("\nFIFTH TEST RESULT:\n");
 	pthread_create(&p[0], NULL, fifthTest, NULL);
 	pthread_join(p[0], NULL);
-	fss_dumpAll(&fss);
+	fs_dumpAll(&fs);
 
 	/* Sixth test */
 	printf("\nSIXTH TEST RESULT:\n");
@@ -272,9 +272,9 @@ int main(void){
 	pthread_join(p[0], NULL);
 	for (int i = 0; i < 3; i++) pthread_create(&p[i], NULL, sixthTest_locking, &args6[i]);
 	for (int i = 0; i < 3; i++) pthread_join(p[i], NULL);
-	fss_dumpAll(&fss);
+	fs_dumpAll(&fs);
 
-	fss_destroy(&fss);
+	fs_destroy(&fs);
 	
 	free(waitClients);
 	return 0;

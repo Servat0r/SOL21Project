@@ -18,7 +18,7 @@ http://didawiki.cli.di.unipi.it/lib/exe/fetch.php/informatica/sol/laboratorio21/
 
 `fflags.h` - Public global flags for `fdata_t` objects.
 
-`fss.h` - Filesystem implementation on top of `fdata.h` and `fflags.h`.
+`fs.h` - Filesystem implementation on top of `fdata.h` and `fflags.h`.
 
 `icl_hash.h` - hash table implementation from Keith Seymour's proxy library code (full copyright notice in `icl_hash.c`)
 
