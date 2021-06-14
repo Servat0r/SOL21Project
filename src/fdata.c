@@ -13,6 +13,21 @@
 
 
 /**
+ * @brief Utility macro for returning after a not recoverable error
+ * and unlocking corresponding rwlock.
+ */
+#define NOTREC_UNLOCK(fdata, sc, msg) \
+do { \
+	if ((sc) == -1){ \
+		perror(msg); \
+		RWL_UNLOCK(&fdata->lock); \
+		errno = ENOTRECOVERABLE; \
+		return -1; \
+	} \
+} while(0);
+
+
+/**
  * @brief Resizes the current array of clients such that client can be
  * inserted in.
  * @return 0 on success (client is suitable for current length, or 
@@ -76,7 +91,7 @@ FileData_t* fdata_create(int maxclient, int creator, bool locking){ /* -> fs_cre
 	fdata->clients = calloc(maxclient + 1, sizeof(unsigned char)); /* Already zeroed */
 	if (!fdata->clients){
 		/* If queue CANNOT be destroyed, we CANNOT avoid (at least) a memory leak */
-		SYSCALL_EXIT(tsqueue_destroy(fdata->waiting, dummy), "fdata_create: while destroying waiting queue");
+		SYSCALL_NOTREC(tsqueue_destroy(fdata->waiting, dummy), -1, "fdata_create: while destroying waiting queue");
 		free(fdata);
 		errno = ENOMEM;
 		return NULL;
@@ -100,6 +115,11 @@ FileData_t* fdata_create(int maxclient, int creator, bool locking){ /* -> fs_cre
  * @brief Open fdata->data for client identified by client.
  * @return 0 on success, -1 on error, 1 if client has been suspended waiting
  * for lock.
+ * @note Operation is done in a "transactional" manner, i.e.:
+ *	- either the client has not yet opened that file and gets to open and lock it;
+ *	- or the client has already opened file and function fails with EBADF;
+ *	- or the client has not yet opened that file and function fails with file
+ *	not opened and lock not acquired.
  * Possible errors are:
  *	- EINVAL: invalid arguments;
  *	- EBADF: file already open.
@@ -228,8 +248,8 @@ int fdata_read(FileData_t* fdata, void** buf, size_t* size, int client, bool ign
  * @return 0 on success, -1 on error.
  * Possible errors are:
  *	- EINVAL: invalid arguments;
- *	- EBADF: file not open or it is not possible to write in it (wr == true,
- *		i.e. a writeFile fails);
+ *	- EBADF: file not open;
+ *	- EPERM: file is open but a writeFile shall fail;
  *	- EBUSY: file is locked by another client;
  *	- ENOMEM: by malloc/realloc.
  */
@@ -247,7 +267,7 @@ int	fdata_write(FileData_t* fdata, void* buf, size_t size, int client, bool wr){
 			errno = EBADF;
 			ret = -1;
 		} else if (wr && !(fdata->clients[client] & LF_WRITE)){
-			errno = EBADF;
+			errno = EPERM;
 			ret = -1;
 		}
 	}
@@ -310,6 +330,7 @@ int fdata_lock(FileData_t* fdata, int client){
 			if (w == 0){
 				fdata->clients[client] |= LF_WAIT;
 				ret = 1;
+			/* Operation fails but error is recoverable! */
 			} else {
 				perror("fdata_lock: while pushing new client on waiting queue");
 				free(wfd);
@@ -347,13 +368,14 @@ int fdata_unlock(FileData_t* fdata, int client, llist_t** newowner){
 	if ((ret == 0) && (fdata->clients[client] & LF_OWNER)){
 		fdata->clients[client] &= ~LF_OWNER;
 		int w;
-		SYSCALL_EXIT((w = tsqueue_pop(fdata->waiting, &n_own, true)), "fdata_unlock: while extracting new owner from waiting queue"); /* nonblocking */
+		/* nonblocking, unrecoverable error (file-lock CANNOT be reassigned) */
+		NOTREC_UNLOCK(fdata, (w = tsqueue_pop(fdata->waiting, &n_own, true)) , "fdata_unlock: while extracting new owner from waiting queue");
 		if (w > 0) fdata->flags &= ~O_LOCK; /* No one is waiting or queue is closed */
 		else if (w == 0){
 			fdata->clients[*n_own] &= ~LF_WAIT;
 			fdata->clients[*n_own] |= LF_OWNER;
 			/* On failure, we could NOT know who is new owner and send it a success message! */
-			SYSCALL_EXIT(llist_push(*newowner, n_own), "fdata_unlock: while adding new owner to list");
+			NOTREC_UNLOCK(fdata, llist_push(*newowner, n_own), "fdata_unlock: while adding new owner to list");
 		}
 	} else ret = (ret ? ret : 1); /* Switches to 1 if there has been no error on CHECK_MAXCLIENT */	
 	if (ret == 0) fdata->clients[client] &= ~LF_WRITE; /* A writeFile will fail */	
@@ -380,23 +402,24 @@ int fdata_removeClient(FileData_t* fdata, int client, llist_t** newowner){
 	CHECK_MAXCLIENT(fdata, client, &ret);
 	if (ret == 0) fdata->clients[client] &= ~(LF_OPEN | LF_WRITE); /* These can be safely eliminated here */
 	/*
-	All SYSCALL_EXIT below are done because an incorrect client-cleanup CANNOT guarantee a future consistent state of what any client
+	All NOTREC_UNLOCK below are done because an incorrect client-cleanup CANNOT guarantee a future consistent state of what any client
 	is doing (i.e., if client id can be recycled after a connection has been closed, there could be an inconsistent state).
 	*/
 	if ((ret == 0) && (fdata->clients[client] & LF_WAIT)){
-		SYSCALL_EXIT(tsqueue_iter_init(fdata->waiting), "fdata_removeClient: while initializing iteration on waiting queue");
+		/* On failure, there could be aliasing between disconnected client and a new one */
+		NOTREC_UNLOCK(fdata, tsqueue_iter_init(fdata->waiting), "fdata_removeClient: while initializing iteration on waiting queue");
 		int* r;
 		int res1, res2;
 		while (true){
-			SYSCALL_EXIT((res1 = tsqueue_iter_next(fdata->waiting, &r)), "fdata_removeClient: while iterating on waiting queue");
+			NOTREC_UNLOCK(fdata, (res1 = tsqueue_iter_next(fdata->waiting, &r)), "fdata_removeClient: while iterating on waiting queue");
 			if (res1 == 1) break; /* Iteration ended */
 			if (*r == client){
-				SYSCALL_EXIT((res2 = tsqueue_iter_remove(fdata->waiting, &r)), "fdata_removeClient: while removing waiting client id");
+				NOTREC_UNLOCK(fdata, (res2 = tsqueue_iter_remove(fdata->waiting, &r)), "fdata_removeClient: while removing waiting client id");
 				free(r);
 				break;
 			}
 		}
-		SYSCALL_EXIT(tsqueue_iter_end(fdata->waiting), "fdata_removeClient: while ending iteration on waiting queue");
+		NOTREC_UNLOCK(fdata, tsqueue_iter_end(fdata->waiting), "fdata_removeClient: while ending iteration on waiting queue");
 		/* If (res1 == 1), iteration has ended without finding client in the waiting queue */
 		fdata->clients[client] &= ~LF_WAIT;
 		RWL_UNLOCK(&fdata->lock);
@@ -419,7 +442,7 @@ int fdata_removeClient(FileData_t* fdata, int client, llist_t** newowner){
 tsqueue_t* fdata_waiters(FileData_t* fdata){
 	RWL_WRLOCK(&fdata->lock);
 	tsqueue_t* waitQueue = fdata->waiting;
-	SYSCALL_EXIT(fdata->waiting = tsqueue_init(), "fdata_waiters: while initializing new waiting queue");
+	fdata->waiting = NULL;
 	for (int i = 0; i < fdata->maxclient; i++) fdata->clients[i] &= ~LF_WAIT;
 	RWL_UNLOCK(&fdata->lock);
 	return waitQueue;
@@ -428,8 +451,9 @@ tsqueue_t* fdata_waiters(FileData_t* fdata){
 
 /**
  * @brief Removes file from file storage and deletes all its data.
+ * @return 0 on success, -1 on error.
  */
-void fdata_destroy(FileData_t* fdata){	
+int fdata_destroy(FileData_t* fdata){	
 	RWL_WRLOCK(&fdata->lock);
 	if (fdata->clients){
 		free(fdata->clients);
@@ -442,12 +466,13 @@ void fdata_destroy(FileData_t* fdata){
 		fdata->data = NULL;	
 	}
 	if (fdata->waiting){
-		tsqueue_destroy(fdata->waiting, free);
+		NOTREC_UNLOCK(fdata, tsqueue_destroy(fdata->waiting, free), "fdata_destroy: while destroying waiting queue");
 		fdata->waiting = NULL;
 	}
 	RWL_UNLOCK(&fdata->lock);
 	RWL_DESTROY(&fdata->lock);
-	free(fdata);		
+	free(fdata);
+	return 0;
 }
 
 

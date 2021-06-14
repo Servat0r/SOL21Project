@@ -1,5 +1,20 @@
 #include <fs.h>
 
+/**
+ * @brief Utility macro for when there is an unrecoverable error
+ * that needs unlocking before returning.
+ */
+#define NOTREC_UNLOCK(fs, sc, msg) \
+do { \
+	if ((sc) == -1){ \
+		perror(msg); \
+		fs_op_end(fs); \
+		errno = ENOTRECOVERABLE; \
+		return -1; \
+	} \
+} while(0);
+
+
 /* ************************ FCONTENT OPERATIONS ********************** */
 
 /**
@@ -74,7 +89,8 @@ static FileData_t* fs_search(FileStorage_t* fs, char* pathname){
 static int fs_trash(FileStorage_t* fs, FileData_t* fdata, char* filename){	
 	size_t fsize = fdata->size;
 	 /* Removes mapping from hash table: failure here means that there will be a "phantom" file in fs */
-	SYSCALL_EXIT(icl_hash_delete(fs->fmap, filename, free, fdata_destroy), "fs_trash: while eliminating file");
+	SYSCALL_NOTREC(icl_hash_delete(fs->fmap, filename, free, dummy), -1, "fs_trash: while eliminating file from hashtable");
+	SYSCALL_NOTREC(fdata_destroy(fdata), -1, "fs_trash: while eliminating file");
 	fs->spaceSize = fs->spaceSize - fsize;
 	return 0;
 }
@@ -117,24 +133,24 @@ static int fs_replace(FileStorage_t* fs, int client, int mode, size_t size, int 
 	do {
 		waitQueue = NULL;
 		int pop = tsqueue_pop(fs->replQueue, &next, true);
-		 /* Either an error occurred and waiting queue is untouched or queue is empty/closed */
+		 /* Either an error occurred and waiting queue is untouched or queue is empty/closed (this error is NOT fatal!) */
 		if (pop != 0) return (pop > 0 ? 1 : -1);
 		/* Filename successfully extracted */
 		printf("Filename successfully extracted, it is: %s\n", next);
 		file = icl_hash_find(fs->fmap, next);
 		if (!file) continue; /* File not existing anymore */
 		waitQueue = fdata_waiters(file);
-		if (!waitQueue) return -1; /* An error occurred, waiting queue is untouched */
+		if (!waitQueue) return -1; /* An error occurred, waiting queue is untouched (this error is NOT fatal!) */
 		if (sendBackHandler){ /* Passed an handler to send back file content (NULL for fs_create!) */
 			void* file_content = file->data;
 			size_t file_size = file->size;
 			sendBackHandler(file_content, file_size, client, (file->flags & O_DIRTY ? true : false)); /* Errors are ignored (file content and size are untouched) */ //FIXME Sure??
 		}
-		fs_trash(fs, file, next); /* Updates automatically spaceSize */
+		SYSCALL_NOTREC(fs_trash(fs, file, next), -1, NULL); /* Updates automatically spaceSize */
 		free(next); /* Frees key extracted from replQueue */
 		waitHandler(waitQueue); /* Errors are ignored (queue is untouched) */ //FIXME Sure??
 		/* We CANNOT avoid (at least a) memory leak */
-		SYSCALL_EXIT(tsqueue_destroy(waitQueue, free), "fs_replace: while destroying waiting queue");
+		SYSCALL_NOTREC(tsqueue_destroy(waitQueue, free), -1, "fs_replace: while destroying waiting queue");
 		bcreate = (fs->fmap->nentries >= fs->maxFileNo) && (mode == R_CREATE); /* Conditions to expel a file for creating a new one */
 		bwrite = (fs->spaceSize + size > fs->storageCap) && (mode == R_WRITE); /* Conditions to expel a file for writing into an existing one */
 		printf("bcreate = %d, bwrite = %d\n", bcreate, bwrite);
@@ -261,8 +277,9 @@ int	fs_init(FileStorage_t* fs, int nbuckets, size_t storageCap, int maxFileNo, i
 	}
 	fs->fmap = icl_hash_create(nbuckets, NULL, NULL);
 	if (!fs->fmap){
-		SYSCALL_EXIT(tsqueue_destroy(fs->replQueue, dummy), "fs_init: while destroying FIFO replacement queue after error on initialization");
 		MTX_DESTROY(&fs->gblock);
+		/* Unavoidable memory leak */
+		SYSCALL_NOTREC(tsqueue_destroy(fs->replQueue, dummy), -1, "fs_init: while destroying FIFO replacement queue after error on initialization");
 		errno = ENOMEM;
 		return -1;
 	}
@@ -287,7 +304,8 @@ int	fs_resize(FileStorage_t* fs, int newmax){
 	fs_wop_init(fs);
 	if (fs->maxclient < newmax){
 		icl_hash_foreach(fs->fmap, tmpint, tmpent, filename, file){
-			SYSCALL_EXIT(fdata_resize(file, newmax), "fs_resize: while resizing file's client-array");
+			/* Unavoidable inconsistent state: there could be a client identifier that causes EINVAL on a file and nothing on another */
+			NOTREC_UNLOCK(fs, fdata_resize(file, newmax), "fs_resize: while resizing file's client-array");
 		}
 		fs->maxclient = newmax;
 	}
@@ -342,32 +360,36 @@ int	fs_create(FileStorage_t* fs, char* pathname, int client, bool locking, int (
 	char* pathcopy2;
 	/* Copies entries for inserting in hashtable and queue */
 	if (make_entry(pathname, &pathcopy1) == -1){
-		fdata_destroy(file); /* No one is waiting now */
+		NOTREC_UNLOCK(fs, fdata_destroy(file), "fs_create: while destroying file after failure"); /* No one is waiting now */
 		fs_op_end(fs);
 		return -1;
 	}
 	if (make_entry(pathname, &pathcopy2) == -1){
-		fdata_destroy(file); /* No one is waiting now */
 		free(pathcopy1);
+		NOTREC_UNLOCK(fs, fdata_destroy(file), "fs_create: while destroying file after failure"); /* No one is waiting now */
 		fs_op_end(fs);
 		return -1;
 	}
 	/* Inserts new file in the replQueue */
 	if (tsqueue_push(fs->replQueue, pathcopy2) == -1){
-		fdata_destroy(file);
 		free(pathcopy1);
 		free(pathcopy2);
+		NOTREC_UNLOCK(fs, fdata_destroy(file), "fs_create: while destroying file after failure");
 		fs_op_end(fs);
 		return -1;
 	}
 	/* Inserts new mapping in the hash table */
 	if (icl_hash_insert(fs->fmap, pathcopy1, file) == -1){
-		fdata_destroy(file);
 		free(pathcopy1);
+		NOTREC_UNLOCK(fs, fdata_destroy(file), "fs_create: while destroying file after failure");
+		 /* "Phantom" filename in queue */
 		if (tsqueue_pop(fs->replQueue, &pathcopy2, true) != 0){
 			free(pathcopy2);
-			exit(EXIT_FAILURE); /* We CANNOT avoid an incosistent state */
+			errno = ENOTRECOVERABLE;
+			fs_op_end(fs);
+			return -1;
 		}
+		free(pathcopy2);
 		fs_op_end(fs);
 		return -1;
 	}
@@ -486,8 +508,20 @@ int	fs_readN(FileStorage_t* fs, int client, int N, llist_t** results){
 	int i = 0;
 	icl_hash_foreach(fs->fmap, tmpint, tmpent, filename, file){
 		if (i >= N) break;
-		if (fdata_read(file, &buf, &size, client, true) != 0) continue;
-		CHECK_COND_EXIT((fc = fcontent_init(filename, size, buf)), "fs_readN: while creating struct for hosting file data\n");
+		int read_ret = fdata_read(file, &buf, &size, client, true);
+		if (read_ret != 0){
+			if (errno = ENOTRECOVERABLE){
+				fs_op_end(fs);
+				return -1;
+			}
+			continue;
+		}
+		fc = fcontent_init(filename, size, buf);
+		if (!fc){
+			perror("fs_readN: while creating struct for hosting file data\n");
+			fs_op_end(fs);
+			return -1; /* List could be partially filled and this is "ok" */
+		}
 		if (llist_push(*results, fc) == -1){
 			perror("fs_readN: while pushing file data onto result list\n");
 			fcontent_destroy(fc);
@@ -643,34 +677,35 @@ int fs_remove(FileStorage_t* fs, char* pathname, int client, int (*waitHandler)(
 	if (!file){ errno = ENOENT; return -1; }
 	if (file->clients[client] & LF_OWNER){ /* File is locked by calling client */
 		waitQueue = fdata_waiters(file);
-		if (!waitQueue){
+		if (!waitQueue){ /* waiting queue is untouched, operation fails with a (non necessarily) fatal error */
 			fs_op_end(fs);
 			return -1;
 		}
 		waitHandler(waitQueue);
-		SYSCALL_EXIT(tsqueue_destroy(waitQueue, free), "fs_remove: while destroying waiting queue");
-		fs_trash(fs, file, pathname); /* Updates spaceSize automatically */
+		/* Unavoidable memory leak */
+		NOTREC_UNLOCK(fs, tsqueue_destroy(waitQueue, free), "fs_remove: while destroying waiting queue");
+		/* "Phantom" file */
+		NOTREC_UNLOCK(fs, fs_trash(fs, file, pathname), "fs_remove: while destroying file"); /* Updates spaceSize automatically */
 		char* pathcopy;
 		size_t n = strlen(pathname);
 		int res1, res2;
-		/* Removes filename from the replacement queue */
-		tsqueue_iter_init(fs->replQueue);
-		while ((res1 = tsqueue_iter_next(fs->replQueue, &pathcopy)) == 0){
+		/* Removes filename from the replacement queue: failure here means possible aliasing with future files */
+		NOTREC_UNLOCK(fs, tsqueue_iter_init(fs->replQueue), "fs_remove: while initializing iteration on replacement queue\n");
+		while (true){
+			NOTREC_UNLOCK(fs, (res1 = tsqueue_iter_next(fs->replQueue, &pathcopy)), "fs_remove: while iterating on replacement queue\n");
+			if (res1 != 0) break;
 			if (!pathcopy) continue;
 			if ( strequal(pathname, pathcopy) ){
 				if ((res2 = tsqueue_iter_remove(fs->replQueue, &pathcopy)) == -1){ /* queue is untouched */
-					tsqueue_iter_end(fs->replQueue);
+					NOTREC_UNLOCK(fs, tsqueue_iter_end(fs->replQueue), "fs_remove: while terminating iteration on queue");
+					errno = ENOTRECOVERABLE; /* "Phantom" filename in replacement queue */
 					fs_op_end(fs);
 					return -1;
 				} else if (res2 == 0) free(pathcopy);
 				break;
 			}
 		}
-		SYSCALL_EXIT(tsqueue_iter_end(fs->replQueue), "fs_remove: while ending iteration on waiting queue");
-		if (res1 == -1){ /* Error on iteration, queue is untouched */
-			fs_op_end(fs);
-			return -1;
-		}
+		NOTREC_UNLOCK(fs, tsqueue_iter_end(fs->replQueue), "fs_remove: while ending iteration on waiting queue");
 	} else ret = 1;
 	fs_op_end(fs);
 	return ret;
@@ -694,7 +729,7 @@ int	fs_clientCleanup(FileStorage_t* fs, int client, llist_t** newowners_list){
 	fs_wop_init(fs); /* Here there will NOT be any other using any file */
 	icl_hash_foreach(fs->fmap, tmpint, tmpent, filename, file){
 		/* If we don't get to remove all client metadata, there will be an inconsistent state in file */
-		SYSCALL_EXIT(fdata_removeClient(file, client, newowners_list),
+		NOTREC_UNLOCK(fs, fdata_removeClient(file, client, newowners_list),
 			"fs_clientCleanup: while removing client metadata\n");
 	}
 	fs->cleanupCount++; /* Cleanup has been correctly executed */
@@ -713,11 +748,12 @@ int	fs_clientCleanup(FileStorage_t* fs, int client, llist_t** newowners_list){
 int	fs_destroy(FileStorage_t* fs){
 	if (!fs){ errno = EINVAL; return -1; }
 
-	SYSCALL_EXIT(icl_hash_destroy(fs->fmap, free, fdata_destroy), "fs_destroy: while destroying file-hashtable");
+	/* Unavoidable memory leak */
+	SYSCALL_NOTREC(icl_hash_destroy(fs->fmap, free, fdata_destroy), -1, "fs_destroy: while destroying file-hashtable");
 	MTX_DESTROY(&fs->gblock);
 	
-	tsqueue_destroy(fs->replQueue, free);
-	
+	/* Unavoidable memory leak */
+	SYSCALL_NOTREC(tsqueue_destroy(fs->replQueue, free), -1, "fs_destroy: while destroying replacement queue");
 	memset(fs, 0, sizeof(FileStorage_t));
 	return 0;
 }

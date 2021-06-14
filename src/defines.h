@@ -26,7 +26,7 @@
 #define CHSIZE sizeof(char) /* For using with integers to cast to size_t */
 #define MAX(X, Y) ( (X) >= (Y) ? (X) : (Y));
 #define MIN(X, Y) ( (X) <= (Y) ? (X) : (Y));
-
+#define MKSTR(X) #X /* "Stringificator" */
 
 /* *********** SYSTEM CALLS ERRORS HANDLING MACROS *********** */
 

@@ -44,13 +44,13 @@ int
 	fdata_lock(FileData_t* fdata, int client), /* (try)lock */
 	fdata_unlock(FileData_t* fdata, int client, llist_t** newowner), /* (try)unlock and returns new owner (if any) */
 	fdata_removeClient(FileData_t* fdata, int client, llist_t** newowner), /* removes all info of a set of clients */
-	fdata_resize(FileData_t* fdata, int client); /* fss->resize */
+	fdata_resize(FileData_t* fdata, int client), /* fss->resize */
+	fdata_destroy(FileData_t* fdata);
 
 tsqueue_t*
 	fdata_waiters(FileData_t* fdata);
 	
 void
-	fdata_destroy(FileData_t* fdata), /* Implicit usage of 'free' (it is ALL heap-allocated for this struct) */
 	fdata_printout(FileData_t* fdata);
 	
 #endif /* _FDATA_H */
