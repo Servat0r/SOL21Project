@@ -30,8 +30,21 @@
 
 /* *********** SYSTEM CALLS ERRORS HANDLING MACROS *********** */
 
-/** @brief Checks whether a system call fails and if yes, prints the
- * corresponding error and exits.
+/**
+ * In the description of the following macros, the term "syscall-like function"
+ * means a function that satisfies the following requirements:
+ *	- on success, returns a value >= 0;
+ *	- on error, returns -1;
+ *	- if there is a condition different from success and error (e.g., an operation
+ *		cannot be completed), returns a value >= 0 DIFFERENT from success value.
+ *	(It is clear that MOST of system calls satisfies this requirements, except e.g.
+ *	for pthread_mutex_lock/unlock etc., but for these functions there are specific
+ *	macros).
+ */
+
+
+/** @brief Checks whether a syscall-like function fails and if yes, prints the
+ * corresponding error and exits current process.
 */
 #define SYSCALL_EXIT(sc, str)	\
 	do { \
@@ -43,8 +56,27 @@
     } while(0);
 
 
-/** @brief Checks whether a system call fails and if yes, prints the
- * corresponding error and sets errno to that, but WITHOUT exiting.
+/**
+ * @brief Checks whether a syscall-like function fails and if yes, sets errno to
+ * ENOTRECOVERABLE and returns what specified in ret. This macro is an alternative
+ * to SYSCALL_EXIT when there is an "almost fatal" error, i.e. a not fatal error but
+ * that could lead the system in which it happens to an inconsistent state and thus
+ * it is not recoverable, but one wants to avoid exiting within the function and let
+ * the caller handle the error (e.g. doing cleanup before exiting).
+ */
+#define SYSCALL_NOTREC(sc, ret, str) \
+	do { \
+		if ((sc) == -1){ \
+			perror(str); \
+			errno = ENOTRECOVERABLE; \
+			return (ret); \
+		} \
+	} while(0);
+
+
+/** 
+ * @brief Checks whether a syscall-like function fails and if yes, prints
+ * the corresponding error and sets errno to that, but WITHOUT exiting.
 */
 #define SYSCALL_PRINT(sc, str)	\
 	do { \
@@ -57,8 +89,8 @@
 
 
 /**
- * @brief Identical to SYSCALL_EXIT but it returns the second argument instead
- * of exiting.
+ * @brief Identical to SYSCALL_EXIT but it returns 
+ * the second argument instead of exiting.
  */
 #define SYSCALL_RETURN(sc, ret, str)	\
 	do { \
@@ -72,8 +104,8 @@
 
 
 /**
- * @brief Checks the expression 'cond' and if (!cond), executes the instruction
- * specified as second argument.
+ * @brief Checks the expression 'cond' and if (!cond),
+ * executes the instruction specified as second argument.
  */
 #define CHECK_COND_EXEC(cond, str, cmd) \
 	do { \
@@ -85,7 +117,8 @@
 
 
 /**
- * @brief As CHECK_COND_EXEC, but it prints out the errno message and exits. 
+ * @brief As CHECK_COND_EXEC, but it prints out 
+ * the errno message and exits. 
  */
 #define CHECK_COND_EXIT(cond, str)	\
 	do { \
@@ -98,7 +131,8 @@
 
 
 /**
- * @brief As CHECK_COND_PRINT, but it only prints the errno message.
+ * @brief As CHECK_COND_PRINT, but it ONLY
+ * prints the error message.
  */
 #define CHECK_COND_PRINT(cond, str)	\
 	do { \

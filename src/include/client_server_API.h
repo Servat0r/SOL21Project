@@ -6,6 +6,16 @@
 #include <util.h>
 #include <protocol.h>
 
+/* 
+ * Maximum size of any message printed out after
+ * having received a result from server.
+*/
+#define RESP_SIZE 1024
+
+
+/* Flag for printing error/success messages from server */
+extern bool prints_enabled;
+
 
 int 
 	openConnection(const char* sockname, int msec, const struct timespec abstime),

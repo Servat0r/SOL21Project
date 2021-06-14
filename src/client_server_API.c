@@ -1,10 +1,10 @@
 /**
  * @brief Implementation of che client-server API.
  *
- * NOTE: In ALL functions that exchange messages with the server, we suppose that either:
+ * NOTE: In ALL functions that exchange messages with the server, we guarantee that either:
  *	1) The server ALWAYS sends back a message M_OK/M_ERR for indicating that operation has completed;
- *	2) The server has been prematurely terminated and so a msg_recv reads EOF from server, thus
- *	invalidating ALL the subsequent content and the corresponding calling fuction fails.
+ *	2) The server has prematurely closed connection and so a msg_recv reads EOF from server,
+ *	thus invalidating ALL the subsequent content and the corresponding calling function fails.
  *
  * @author Salvatore Correnti.
  */
@@ -27,6 +27,105 @@ static struct sockaddr_un serverAddr;
 static const socklen_t addrLen = UNIX_PATH_MAX;
 static int serverfd = -1;
 
+
+/**
+ * @brief Flag for printing error messages after a server failure.
+ * @note This variable is declared as "extern" in client_server_API.h in order to
+ * make it available to client by including the header.
+ */
+bool prints_enabled = false;
+
+
+/**
+ * @brief Copies message corresponding to given error (or success) into an ALREADY
+ * allocated buffer passed by msg, whose size MUST be of at least size bytes.
+ * @return 0 on success, -1 on error.
+ */
+static int result_msg(int result, char* msg, size_t size){
+	if ((result < 0) || !msg){ errno = EINVAL; return -1; }
+	memset(msg, 0, size);
+	switch(result){
+		case 0: {
+			strncpy(msg, "Success", size);
+			break;
+		}
+		case ENOENT: {
+			strncpy(msg, "File not found on server", size);
+			break;
+		}
+		case EEXIST: {
+			strncpy(msg, "File already existing on server", size);
+			break;
+		}
+		case EBADF: {
+			strncpy(msg, "Open/close or I/O operation cannot be performed", size);
+			break;
+		}
+		case EBUSY: {
+			strncpy(msg, "File is already locked by another client", size);
+			break;
+		}
+		case ENOMEM: {
+			strncpy(msg, "Server is out of memory", size);
+			break;
+		}
+		case EINVAL: {
+			strncpy(msg, "Bad arguments passed", size);
+			break;
+		}
+		case ENOTRECOVERABLE: {
+			strncpy(msg, "Fatal error on server", size);
+			break;
+		}
+		default: {
+			strncpy(msg, "Unknown result code", size);
+			break;
+		}
+	}
+	return 0;
+}
+
+
+/**
+ * The following three macros are utilities for printing messages
+ * when stdout prints are enabled.
+ *	- PRINT_OP_SIMPLE is used for messages without any read/written bytes;
+ *	- PRINT_OP_RD is used for messages with a reading operation;
+ *	- PRINT_OP_WR is used for messages with a writing operation.
+ */
+
+
+#define PRINT_OP_SIMPLE(op, file, code) \
+do { \
+	char* format = "[process %d] <operation = '%s'> <filename = '%s'> <result = '%s'>\n"; \
+	char response[1024]; \
+	if (prints_enabled){ \
+		if (result_msg(code, response, RESP_SIZE) == -1) break; \
+		fprintf(stdout, format, getpid(), #op, file, response); \
+	} \
+} while(0);
+
+
+#define PRINT_OP_RD(op, file, code, rbytes) \
+do { \
+	char* format = "[process %d] <operation = '%s'> <filename = '%s'> <result = '%s'> <read bytes = %lu>\n"; \
+	char response[1024]; \
+	if (prints_enabled){ \
+		if (result_msg(code, response, RESP_SIZE) == -1) break; \
+		fprintf(stdout, format, getpid(), #op, file, response, rbytes); \
+	} \
+} while(0);
+
+
+#define PRINT_OP_WR(op, file, code, wbytes) \
+do { \
+	char* format = "[process %d] <operation = '%s'> <filename = '%s'> <result = '%s'> <written bytes = %lu>\n"; \
+	char response[1024]; \
+	if (prints_enabled){ \
+		if (result_msg(code, response, RESP_SIZE) == -1) break; \
+		fprintf(stdout, format, getpid(), #op, file, response, wbytes); \
+	} \
+} while(0);
 
 
 /**
@@ -57,59 +156,71 @@ int openConnection(const char* sockname, int msec, const struct timespec abstime
 	/* Struct for (one-shot) timer */
 	struct itimerspec itsp;
 	memset(&itsp, 0, sizeof(itsp));
-	if (clock_gettime(CLOCK_REALTIME, &itsp.it_value) == -1){
-		perror("clock_gettime");
-		return -1;
-	}
+	SYSCALL_RETURN(clock_gettime(CLOCK_REALTIME, &itsp.it_value), -1, "openConnection: when getting time");
 	itsp.it_value.tv_sec += abstime.tv_sec;
 	itsp.it_value.tv_nsec += abstime.tv_nsec;
 	itsp.it_interval.tv_sec = 0;
 	itsp.it_interval.tv_nsec = 0;
+	
 	int res, tfd; /* Result of successive connect/poll calls; timer file descriptor */
 	struct pollfd pfd;
 	memset(&pfd, 0, sizeof(pfd));
-	serverfd = socket(AF_UNIX, SOCK_STREAM, 0);
-	if (serverfd == -1){
-		perror("openConnection");
-		return -1; /* Failed to open socket */
-	} else {
-		/* Set serverfd to nonblocking mode */
-		int sockflags = fcntl(serverfd, F_GETFL, 0);
-		fcntl(serverfd, F_SETFL, sockflags | O_NONBLOCK);
-		
-		tfd = timerfd_create(CLOCK_REALTIME, 0);
-		if (tfd == -1) return -1;
-		pfd.fd = tfd;
-		pfd.events = POLLIN;
-		pfd.revents = 0;
-		res = timerfd_settime(tfd, TFD_TIMER_ABSTIME, &itsp, NULL);
-		if (res == 0){
-			while (true){
-				res = connect(serverfd, &serverAddr, UNIX_PATH_MAX);
-				/* SUCCESS */
-				if (res == 0){
-					close(tfd);
-					fcntl(serverfd, F_SETFL, sockflags); /* Resets to blocking socket */
-					return 0;
-				/* ERROR */
-				} else if (errno == EAGAIN){
-					res = poll(&pfd, 1, msec);
-					if (res == 1){ /* Timeout expired , pfd.revents & POLLIN*/
-						errno = ETIMEDOUT;
-						perror("openConnection");
-						break;
-					} else continue;
-				} else {
-					perror("openConnection");
-					break;
-				}
-			}
-		} else perror("openConnection");
-		close(tfd);
+	
+	/* An error in socket guarantees to write '-1' in serverfd and to maintain the semantics of "-1 == unexisting socket" */
+	SYSCALL_RETURN((serverfd = socket(AF_UNIX, SOCK_STREAM, 0)), -1, "openConnection: while creating socket");
+	
+	/* Set serverfd to nonblocking mode */
+	int sockflags = fcntl(serverfd, F_GETFL, 0);
+	fcntl(serverfd, F_SETFL, sockflags | O_NONBLOCK);
+	
+	/* Creates and arms timer */
+	tfd = timerfd_create(CLOCK_REALTIME, 0);
+	if (tfd == -1){
+		perror("openConnection: while creating timer");
 		close(serverfd);
 		serverfd = -1;
 		return -1;
 	}
+	pfd.fd = tfd;
+	pfd.events = POLLOUT;
+	pfd.revents = 0;
+	res = timerfd_settime(tfd, TFD_TIMER_ABSTIME, &itsp, NULL);
+	if (res == 0){
+		while (true){
+			res = connect(serverfd, &serverAddr, UNIX_PATH_MAX);
+			/* SUCCESS */
+			if (res == 0){
+				close(tfd);
+				fcntl(serverfd, F_SETFL, sockflags); /* Resets to blocking socket */
+				return 0;
+			/* ERROR */
+			} else if (errno == EISCONN){
+				close(tfd);
+				fcntl(serverfd, F_SETFL, sockflags);
+				return 0;
+			/*
+				1. Connection request cannot be completed immediately but is ongoing.
+				2. Another connection request is being processed.
+				3. There is no listening socket with that address (e.g. server has not started yet). 
+			*/
+			} else if ((errno == EAGAIN) || (errno == EALREADY) || (errno == ENOENT)){
+				res = poll(&pfd, 1, msec);
+				if (res == 1){ /* Timeout expired , pfd.revents & POLLIN*/
+					errno = ETIMEDOUT;
+					perror("openConnection: while waiting for connecting");
+					break;
+				} else continue; /* No notification by timer */
+				/* Now we are exiting and closing serverfd, so if connection has been established in the middle of timeout it will be reset */
+			} else {
+				perror("openConnection: while trying to connect");
+				break;
+			}
+		}
+	} else perror("openConnection: while arming timer");
+	close(tfd);
+	close(serverfd);
+	serverfd = -1;
+	return -1;
 }
 
 
@@ -123,7 +234,7 @@ int openConnection(const char* sockname, int msec, const struct timespec abstime
  */
 int closeConnection(const char* sockname){
 	if (serverfd < 0){ /* Not connected */
-		errno = ENOTCONN; 
+		errno = ENOTCONN;
 		perror("closeConnection");
 		return -1;
 	}
@@ -138,7 +249,6 @@ int closeConnection(const char* sockname){
 }
 
 
-
 /**
  * @brief Tries to open a file in the server with the absolute path #pathname.
  * @param pathname -- Absolute path of the file to open.
@@ -146,18 +256,16 @@ int closeConnection(const char* sockname){
  * create a new file in the server with that pathname; if (flags & O_LOCK), it tries to
  * open a file in locked-mode, i.e. no other one can read or write on this file: if file
  * is already locked by anyone else, it blocks until lock on file is released.
- *
- * NOTE: For now O_LOCK is not really supported.
- *
  * @return 0 on success, -1 on error (errno set).
  * Possible errors are:
  *	- EINVAL: invalid pathname or unknown flags specified;
  *	- ENOMEM: unable to allocate memory for sending request to server;
  *	- EBADMSG: wrong message received by server or EOF read by a mrecv before
  *		having received all current message content;
- *	- EBADF: there is no active connection on #serverfd;
- *	- any error returned by msend/mrecv or by the server (M_ERR received).
- */
+ *	- ENOTCONN: there is no active connection on #serverfd;
+ *	- EBADE: (not fatal) error on server;
+ *	- any error returned by msend/mrecv.
+  */
 int openFile(const char* pathname, int flags){
 	if (!pathname || (flags && !(flags & O_CREATE) && !(flags & O_LOCK))){ /* NULL pathname or invalid flags */
 		errno = EINVAL;
@@ -168,7 +276,7 @@ int openFile(const char* pathname, int flags){
 	message_t* msg;
 	
 	if (serverfd < 0){ /* Not connected */
-		errno = EBADF;
+		errno = ENOTCONN;
 		perror("openFile");		
 		return -1;
 	}
@@ -183,21 +291,22 @@ int openFile(const char* pathname, int flags){
 		SYSCALL_RETURN(mrecv(serverfd, &msg, "openFile: while creating data to receive message", 
 			"openFile: while receiving message from server"), -1, NULL);
 		if (msg->type == M_ERR){
-			errno = *((int*)msg->args[0].content); /* Error on server */
+			int error = *((int*)msg->args[0].content); /* Error on server */
+			PRINT_OP_SIMPLE(openFile, pathname, error);
+			errno = EBADE;
 			res = -1;
 			break;
 		} else if (msg->type == M_OK){
+			PRINT_OP_SIMPLE(openFile, pathname, 0);
 			res = 0;
 			break;
 		} else { /* Bad message */
 			errno = EBADMSG;
 			res = -1;
-			msg_destroy(msg, free, free);
-			continue;
+			break;
 		}
 	}
 	msg_destroy(msg, free, free);
-	
 	return res;
 }
 
@@ -211,8 +320,9 @@ int openFile(const char* pathname, int flags){
  *	- EBADMSG: wrong message received by server or EOF read by a mrecv before
  *		having received all current message content;
  *	- EBADF: there is no active connection;
- *	- any error returned by msend/mrecv or by the server (M_ERR received).
- */
+ *	- EBADE: (not fatal) error on server;
+ *	- any error returned by msend/mrecv.
+  */
 int closeFile(const char* pathname){
 	if (!pathname){
 		errno = EINVAL;
@@ -238,17 +348,19 @@ int closeFile(const char* pathname){
 		SYSCALL_RETURN(mrecv(serverfd, &msg, "closeFile: while creating data to receive message",
 			"closeFile: while receiving message from server"), -1, NULL);
 		if (msg->type == M_ERR){
-			errno = *((int*)msg->args[0].content); /* Error on server */
+			int error = *((int*)msg->args[0].content); /* Error on server */
+			PRINT_OP_SIMPLE(closeFile, pathname, error);
+			errno = EBADE;
 			res = -1;
 			break;
 		} else if (msg->type == M_OK){
+			PRINT_OP_SIMPLE(closeFile, pathname, 0);
 			res = 0;
 			break;
 		} else { /* Bad message */
 			errno = EBADMSG;
 			res = -1;
-			msg_destroy(msg, free, free);
-			continue;
+			break;
 		}
 	}
 	msg_destroy(msg, free, free);
@@ -267,8 +379,9 @@ int closeFile(const char* pathname){
  *	- EBADMSG: wrong message received by server or EOF read by a mrecv before
  *		having received all current message content;
  *	- EBADF: there is no active connection;
- *	- any error returned by msend/mrecv or by server (M_ERR received).
- */
+ *	- EBADE: (not fatal) error on server;
+ *	- any error returned by msend/mrecv.
+  */
 int readFile(const char* pathname, void** buf, size_t* size){
 	if (!pathname || !buf || !size){ errno = EINVAL; return -1; }
 	int res;
@@ -283,15 +396,19 @@ int readFile(const char* pathname, void** buf, size_t* size){
 
 	SYSCALL_RETURN(msend(serverfd, &msg, M_READF, "readFile: while creating message to send",
 		"readFile: while sending message to server", strlen(pathname) + 1, pathname), -1, NULL);
-
+	
+	size_t rbytes = 0; /* For stats printing */
 	while (true){
 		SYSCALL_RETURN(mrecv(serverfd, &msg, "readFile: while creating data to receive message",
 			"readFile: while receiving message from server"), -1, NULL);
 		if (msg->type == M_ERR){
-			errno = *((int*)msg->args[0].content);
+			int error = *((int*)msg->args[0].content); /* Error on server */
+			PRINT_OP_RD(readFile, pathname, error, rbytes);
+			errno = EBADE;
 			res = -1;
 			break;
 		} else if (msg->type == M_OK){
+			PRINT_OP_RD(readFile, pathname, 0, rbytes);
 			res = 0;
 			break;
 		} else if ((msg->type == M_GETF) && !frecv){
@@ -299,12 +416,13 @@ int readFile(const char* pathname, void** buf, size_t* size){
 			*size = msg->args[1].len;
 			frecv = true;
 			res = 0;
+			rbytes += *size;
 			msg_destroy(msg, free, dummy);
+			continue;
 		} else {
 			errno = EBADMSG;
 			res = -1;
-			msg_destroy(msg, free, free);
-			continue;
+			break;
 		} /* Wrong message received */
 	}
 	msg_destroy(msg, free, free);
@@ -325,7 +443,8 @@ int readFile(const char* pathname, void** buf, size_t* size){
  *	- EBADMSG: wrong message received by server or EOF read by a mrecv before
  *		having received all current message content;
  *	- EBADF: there is no active connection;
- *	- any error returned by msend/mrecv or by the server (M_ERR received).
+ *	- EBADE: (not fatal) error on server;
+ *	- any error returned by msend/mrecv.
  */
 int appendToFile(const char* pathname, void* buf, size_t size, const char* dirname){
 	if (!pathname || !buf || !dirname){ errno = EINVAL; return -1; }
@@ -340,14 +459,18 @@ int appendToFile(const char* pathname, void* buf, size_t size, const char* dirna
 
 	SYSCALL_RETURN(msend(serverfd, &msg, M_APPENDF, "appendToFile: while creating message to send", 
 		"appendToFile: while sending message to server", strlen(pathname)+1, pathname, size, buf), -1, NULL);
+	
 	while (true){
 		SYSCALL_RETURN(mrecv(serverfd, &msg, "appendToFile: while creating data to receive message",
 			"appendToFile: while receiving message from server"), -1, NULL);
 		if (msg->type == M_ERR){
-			errno = *((int*)msg->args[0].content);
+			int error = *((int*)msg->args[0].content); /* Error on server */
+			PRINT_OP_WR(appendToFile, pathname, error, 0); /* No data written */
+			errno = EBADE;
 			res = -1;
 			break;
 		} else if (msg->type == M_OK){
+			PRINT_OP_WR(appendToFile, pathname, 0, size); /* All data written */
 			res = 0;
 			break;
 		} else if (msg->type == M_GETF){
@@ -361,8 +484,7 @@ int appendToFile(const char* pathname, void* buf, size_t size, const char* dirna
 		} else { /* Wrong message received */
 			errno = EBADMSG;
 			res = -1;
-			msg_destroy(msg, free, free);
-			continue;
+			break;
 		}
 	}
 	msg_destroy(msg, free, free); /* M_OK / M_ERR */
@@ -383,7 +505,8 @@ int appendToFile(const char* pathname, void* buf, size_t size, const char* dirna
  *	- ENOMEM: unable to allocate memory for sending request to the server;
  *	- EBADMSG: bad message received from server (i.e., bad message type or incomplete one);
  *	- EBADF: there is no active connection;
- *	- any error received from server (M_ERR received).
+ *	- EBADE: (not fatal) error on server;
+ *	- any error returned by msend/mrecv.
  */
 int writeFile(const char* pathname, const char* dirname){
 	if (!pathname){ errno = EINVAL; return -1; }
@@ -406,10 +529,13 @@ int writeFile(const char* pathname, const char* dirname){
 		SYSCALL_RETURN(mrecv(serverfd, &msg, "writeFile: while creating data to receive message",
 			"writeFile: while receiving message from server"), -1, NULL);
 		if (msg->type == M_ERR){
-			errno = *((int*)msg->args[0].content);
+			int error = *((int*)msg->args[0].content); /* Error on server */
+			PRINT_OP_WR(writeFile, pathname, error, 0); /* No data written */
+			errno = EBADE;
 			res = -1;
 			break;
 		} else if (msg->type == M_OK){
+			PRINT_OP_WR(writeFile, pathname, 0, size); /* All data written */
 			res = 0;
 			break;
 		} else if (msg->type == M_GETF){
@@ -423,8 +549,7 @@ int writeFile(const char* pathname, const char* dirname){
 		} else { /* Wrong message received */
 			errno = EBADMSG;
 			res = -1;
-			msg_destroy(msg, free, free);
-			continue;
+			break;
 		}
 	}
 	msg_destroy(msg, free, free); /* M_OK / M_ERR */
@@ -444,7 +569,8 @@ int writeFile(const char* pathname, const char* dirname){
  *	- EBADMSG: wrong message received by server or EOF read by a mrecv before
  *		having received all current message content;
  *	- EBADF: there is no active connection;
- *	- all errors returned by msend/mrecv or by the server (M_ERR received).
+ *	- EBADE: (not fatal) error on server;
+ *	- all errors returned by msend/mrecv.
  */
 int	readNFiles(int N, const char* dirname){
 	int res = 0;
@@ -458,18 +584,24 @@ int	readNFiles(int N, const char* dirname){
 
 	SYSCALL_RETURN(msend(serverfd, &msg, M_READNF, "readNFiles: while creating message to send", 
 		"readNFiles: while sending message to server", sizeof(int), &N), -1, NULL);
-
+		
+	size_t rbytes = 0; /* Total bytes read */
 	while (true){
 		SYSCALL_RETURN(mrecv(serverfd, &msg, "readNFiles: while creating data to receive message",
 			"readNFiles: while receiving message from server"), -1, NULL);
-		if (msg->type == M_OK) break;
-		else if (msg->type == M_ERR){
-			errno = *((int*)msg->args[0].content);
+		if (msg->type == M_OK){
+			PRINT_OP_RD(readNFiles, "(N files)", 0, rbytes);
+			break;
+		} else if (msg->type == M_ERR){
+			int error = *((int*)msg->args[0].content); /* Error on server */
+			PRINT_OP_RD(readNFiles, "(N files)", error, rbytes);
+			errno = EBADE;
 			res = -1;
 			break;
 		} else if (msg->type == M_GETF){
 			if (((N > 0) && (res < N)) || (N <= 0)){
 				res++;
+				rbytes += msg->args[1].len; /* File size */
 				/* If dirname == NULL, saveFile does not do anything and returns 1 */
 				if (saveFile((const char*)msg->args[0].content, dirname, msg->args[1].content, msg->args[1].len) == -1){
 					int errno_copy = errno;
@@ -477,17 +609,17 @@ int	readNFiles(int N, const char* dirname){
 					errno = errno_copy;
 					perror(NULL);
 				}
+				msg_destroy(msg, free, free);
+				continue;
 			} else {
 				errno = EMFILE; /* Too many "available" files */
 				res = -1;
+				break;
 			}
-			continue;
-			msg_destroy(msg, free, free);
 		} else { /* Wrong message */
 			errno = EBADMSG;
 			res = -1;
-			msg_destroy(msg, free, free);
-			continue;
+			break;
 		}
 	}
 	msg_destroy(msg, free, free);
@@ -510,7 +642,8 @@ int	readNFiles(int N, const char* dirname){
  *	- EBADMSG: bad message received from server (i.e.,
  *	bad message type or incomplete one);
  *	- EBADF: there is no active connection;
- *	- any error received from server (M_ERR received).
+ *	- EBADE: (not fatal) error on server;
+ *	- any error returned by msend/mrecv.
  */
 int lockFile(const char* pathname){
 	if (!pathname){
@@ -537,17 +670,19 @@ int lockFile(const char* pathname){
 		SYSCALL_RETURN(mrecv(serverfd, &msg, "lockFile: while creating data to receive message",
 			"lockFile: while receiving message from server"), -1, NULL);
 		if (msg->type == M_ERR){
-			errno = *((int*)msg->args[0].content); /* Error on server */
+			int error = *((int*)msg->args[0].content); /* Error on server */
+			PRINT_OP_SIMPLE(lockFile, pathname, error);
+			errno = EBADE;
 			res = -1;
 			break;
 		} else if (msg->type == M_OK){
+			PRINT_OP_SIMPLE(unlockFile, pathname, 0);
 			res = 0;
 			break;
 		} else { /* Bad message */
 			errno = EBADMSG;
 			res = -1;
-			msg_destroy(msg, free, free);
-			continue;
+			break;
 		}
 	}
 	msg_destroy(msg, free, free);
@@ -568,7 +703,8 @@ int lockFile(const char* pathname){
  *	- EBADMSG: bad message received from server (i.e.,
  *	bad message type or incomplete one);
  *	- EBADF: there is no active connection;
- *	- any error received from server (M_ERR received).
+ *	- EBADE: (not fatal) error on server;
+ *	- any error returned by msend/mrecv.
  */
 int unlockFile(const char* pathname){
 	if (!pathname){
@@ -595,21 +731,22 @@ int unlockFile(const char* pathname){
 		SYSCALL_RETURN(mrecv(serverfd, &msg, "unlockFile: while creating data to receive message",
 			"unlockFile: while receiving message from server"), -1, NULL);
 		if (msg->type == M_ERR){
-			errno = *((int*)msg->args[0].content); /* Error on server */
+			int error = *((int*)msg->args[0].content); /* Error on server */
+			PRINT_OP_SIMPLE(unlockFile, pathname, error);
+			errno = EBADE;
 			res = -1;
 			break;
 		} else if (msg->type == M_OK){
+			PRINT_OP_SIMPLE(unlockFile, pathname, 0);
 			res = 0;
 			break;
 		} else { /* Bad message */
 			errno = EBADMSG;
 			res = -1;
-			msg_destroy(msg, free, free);
-			continue;
+			break;
 		}
 	}
 	msg_destroy(msg, free, free);
-	
 	return res;
 }
 
@@ -624,7 +761,8 @@ int unlockFile(const char* pathname){
  *	- EBADMSG: bad message received from server (i.e.,
  *	bad message type or incomplete one);
  *	- EBADF: there is no active connection;
- *	- any error received from server (M_ERR received).
+ *	- EBADE: (not fatal) error on server;
+ *	- any error returned by msend/mrecv.
  */
 int removeFile(const char* pathname){
 	if (!pathname){
@@ -651,20 +789,21 @@ int removeFile(const char* pathname){
 		SYSCALL_RETURN(mrecv(serverfd, &msg, "removeFile: while creating data to receive message",
 			"removeFile: while receiving message from server"), -1, NULL);
 		if (msg->type == M_ERR){
-			errno = *((int*)msg->args[0].content); /* Error on server */
+			int error = *((int*)msg->args[0].content); /* Error on server */
+			PRINT_OP_SIMPLE(removeFile, pathname, error);
+			errno = EBADE;
 			res = -1;
 			break;
 		} else if (msg->type == M_OK){
+			PRINT_OP_SIMPLE(removeFile, pathname, 0);
 			res = 0;
 			break;
 		} else { /* Bad message */
 			errno = EBADMSG;
 			res = -1;
-			msg_destroy(msg, free, free);
-			continue;
+			break;
 		}
 	}
-	msg_destroy(msg, free, free);
-	
+	msg_destroy(msg, free, free);	
 	return res;
 }

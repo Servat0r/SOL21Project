@@ -73,7 +73,8 @@ static FileData_t* fs_search(FileStorage_t* fs, char* pathname){
  */
 static int fs_trash(FileStorage_t* fs, FileData_t* fdata, char* filename){	
 	size_t fsize = fdata->size;
-	SYSCALL_EXIT(icl_hash_delete(fs->fmap, filename, free, fdata_destroy), "fs_trash: while eliminating file"); /* Removes mapping from hash table */
+	 /* Removes mapping from hash table: failure here means that there will be a "phantom" file in fs */
+	SYSCALL_EXIT(icl_hash_delete(fs->fmap, filename, free, fdata_destroy), "fs_trash: while eliminating file");
 	fs->spaceSize = fs->spaceSize - fsize;
 	return 0;
 }
@@ -467,7 +468,8 @@ int	fs_read(FileStorage_t* fs, char* pathname, void** buf, size_t* size, int cli
  * fcontent_t objects.
  * @return 0 on success, -1 on error, exits on fatal error.
  * Possible errors are:
- *	- EINVAL: invalid arguments.
+ *	- EINVAL: invalid arguments;
+ *	- any error by llist_push, fcontent_init.
  */
 int	fs_readN(FileStorage_t* fs, int client, int N, llist_t** results){
 	if (!results || (client < 0)){ errno = EINVAL; return -1; }
@@ -486,7 +488,12 @@ int	fs_readN(FileStorage_t* fs, int client, int N, llist_t** results){
 		if (i >= N) break;
 		if (fdata_read(file, &buf, &size, client, true) != 0) continue;
 		CHECK_COND_EXIT((fc = fcontent_init(filename, size, buf)), "fs_readN: while creating struct for hosting file data\n");
-		SYSCALL_EXIT(llist_push(*results, fc), "fs_readN: while pushing file data onto result list\n");
+		if (llist_push(*results, fc) == -1){
+			perror("fs_readN: while pushing file data onto result list\n");
+			fcontent_destroy(fc);
+			fs_op_end(fs);
+			return -1;
+		}
 		i++; /* File successfully read */
 	}
 	fs_op_end(fs);
