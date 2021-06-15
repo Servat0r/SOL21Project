@@ -58,7 +58,7 @@ ssize_t getArgn(msg_t type){
 		
 		case M_ERR: /* errno code */
 		case M_READF: /* filename */
-		case M_READNF: /* filename */
+		case M_READNF: /* fileno */
 		case M_CLOSEF: /* filename */
 		case M_LOCKF: /* filename */
 		case M_UNLOCKF: /* filename */
@@ -195,13 +195,12 @@ int msg_send(message_t* msg, int fd){
  */
 #define CLEANUP_RETURN(msg, res, i, string) \
 	do { \
-		errno_copy = errno; \
 		for (ssize_t j = 0; j < i; j++) free(msg->args[j].content); \
 		free(msg->args); \
+		msg->args = NULL; \
 		msg->argn = 0; \
 		if (res == -1){ \
-			errno = errno_copy; \
-			perror(#string); \
+			perror(string); \
 			return -1; \
 		} \
 	} while(0);
@@ -224,7 +223,6 @@ int msg_send(message_t* msg, int fd){
 */
 int msg_recv(message_t* msg, int fd){		
 	int res;
-	int errno_copy = 0;
 	
 	/* res == -1 => an error (different from connreset) has occurred; the same applies on the following reads */
 	SYSCALL_RETURN((res = readn(fd, &msg->type, sizeof(msg_t))), -1, "When reading msgtype");
@@ -247,7 +245,6 @@ int msg_recv(message_t* msg, int fd){
 		res = readn(fd, msg->args[i].content, msg->args[i].len);
 		if (res <= 0) CLEANUP_RETURN(msg, res, i+1, "When reading arg");
 		if (res == 0){ errno = ECONNRESET; return 0; }
-
 	}
 	return 1;
 }
@@ -336,7 +333,7 @@ int mrecv(int fd, message_t** msg, char* creatmsg, char* recvmsg){
 	}
 	if (msg_recv(*msg, fd) < 1){ /* Message not correctly received */
 		int errno_copy = errno;
-		msg_destroy(*msg, nothing, nothing);
+		msg_destroy(*msg, free, free);
 		errno = errno_copy;
 		*msg = NULL; //FIXME Okay?
 		return -1;

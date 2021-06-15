@@ -397,12 +397,12 @@ int readFile(const char* pathname, void** buf, size_t* size){
 	}
 
 	SYSCALL_RETURN(msend(serverfd, &msg, M_READF, "readFile: while creating message to send",
-		"readFile: while sending message to server", strlen(pathname) + 1, pathname), -1, NULL);
+		"readFile: while sending message to server", strlen(pathname) + 1, pathname), -1, "readFile: msend");
 	
 	size_t rbytes = 0; /* For stats printing */
 	while (true){
 		SYSCALL_RETURN(mrecv(serverfd, &msg, "readFile: while creating data to receive message",
-			"readFile: while receiving message from server"), -1, NULL);
+			"readFile: while receiving message from server"), -1, "readFile: mrecv");
 		if (msg->type == M_ERR){
 			int error = *((int*)msg->args[0].content); /* Error on server */
 			PRINT_OP_RD(readFile, pathname, error, rbytes);
@@ -416,10 +416,11 @@ int readFile(const char* pathname, void** buf, size_t* size){
 		} else if ((msg->type == M_GETF) && !frecv){
 			*buf = msg->args[1].content; /* First is path */
 			*size = msg->args[1].len;
+			msg->args[1].content = NULL; /* To destroy message */
 			frecv = true;
 			res = 0;
 			rbytes += *size;
-			msg_destroy(msg, free, dummy);
+			msg_destroy(msg, free, free);
 			continue;
 		} else {
 			errno = EBADMSG;

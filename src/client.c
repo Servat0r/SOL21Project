@@ -273,8 +273,7 @@ int w_handler(optval_t* wopt, char* dirname){
 	/* On success, filelist shall contain HEAP-allocated ABSOLUTE paths. */
 	SYSCALL_RETURN(dirscan(nomedir, n, &filelist), -1, "w_handler: while scanning directory");
 	MULTIARG_TRANSACTION_HANDLER(writeFile, filelist, dirname, (O_CREATE | O_LOCK), &ret);
-	//TODO In teoria questo si potrebbe portare anche dentro la macro passando &filelist e settandolo NULL in caso di errore
-	if (ret == -1) llist_destroy(filelist, free);
+	llist_destroy(filelist, free);
 	return ret;
 }
 
@@ -307,6 +306,8 @@ int r_handler(optval_t* ropt, char* dirname){
 	
 	llist_foreach(files, node){
 		ret = 0;
+		filebuf = NULL;
+		filesize = 0;
 		if ( !(realFilePath = realpath((char*)(node->datum), NULL)) ){
 			perror("r_handler: while getting absolute path of file");
 			ret = -1;
@@ -328,7 +329,7 @@ int r_handler(optval_t* ropt, char* dirname){
 			}
 		} else if (closeFile(realFilePath) == -1){
 			free(realFilePath);
-			if (filesize > 0) free(filebuf); /* Contains data read */ //FIXME Sure that is okay? An empty file??
+			free(filebuf); /* Contains data read or is NULL (=> no operation) */
 			filebuf = NULL;
 			filesize = 0;
 			if (errno != EBADE){
@@ -349,6 +350,7 @@ int r_handler(optval_t* ropt, char* dirname){
 	/* realFilePath and filebuf are ALWAYS freed here */
 	return ret;
 }
+
 
 /**
  * @brief Command-line arguments execution after parsing and validation.
@@ -445,7 +447,7 @@ int client_run(llist_t* optvals, long msec_delay){
 			}
 		} /* end of switch */
 		if (ret == -1) EXEC_OPT_ERRMSG(optname);
-		if (errno != EBADE){
+		if ((ret == -1) && (errno != EBADE)){
 			perror("client_run");
 			break;
 		}
