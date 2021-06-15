@@ -416,6 +416,7 @@ int client_run(llist_t* optvals, long msec_delay){
 						N = (int)lN;
 						ret = readNFiles(N, dirname); //TODO dirname
 						if ((ret == -1) && (errno == EBADE)) ret = 0; /* As other handlers */
+						else if (ret >= 0) ret = 0; /* Uniform result */
 					}
 					/* with ret == -1, we do nothing */				
 				}

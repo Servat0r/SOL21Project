@@ -116,6 +116,17 @@ do { \
 	} \
 } while(0);
 
+/* For printing number of read files for readNFiles */
+#define PRINT_OP_RDNF(op, N, code, rbytes) \
+do { \
+	char* format = "[process %d] <operation = '%s'> <Nfiles = %d> <result = '%s'> <read bytes = %lu>\n"; \
+	char response[1024]; \
+	if (prints_enabled){ \
+		if (result_msg(code, response, RESP_SIZE) == -1) break; \
+		fprintf(stdout, format, getpid(), #op, N, response, rbytes); \
+	} \
+} while(0);
+
 
 #define PRINT_OP_WR(op, file, code, wbytes) \
 do { \
@@ -594,11 +605,11 @@ int	readNFiles(int N, const char* dirname){
 		SYSCALL_RETURN(mrecv(serverfd, &msg, "readNFiles: while creating data to receive message",
 			"readNFiles: while receiving message from server"), -1, NULL);
 		if (msg->type == M_OK){
-			PRINT_OP_RD(readNFiles, "(N files)", 0, rbytes);
+			PRINT_OP_RDNF(readNFiles, res, 0, rbytes);
 			break;
 		} else if (msg->type == M_ERR){
 			int error = *((int*)msg->args[0].content); /* Error on server */
-			PRINT_OP_RD(readNFiles, "(N files)", error, rbytes);
+			PRINT_OP_RDNF(readNFiles, res, error, rbytes);
 			errno = EBADE;
 			res = -1;
 			break;

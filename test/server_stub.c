@@ -16,7 +16,9 @@
 /* Example of read file */
 #define READF_DATA "abcdefghijklmnopqrstuvwxyz"
 #define READF_DSIZE strlen(READF_DATA)+1
-
+/* Path for readNFiles */
+#define READNF_PATH "/dir1/otherfile.txt"
+#define READNF_PSIZE strlen(READNF_PATH)+1
 
 void cleanup(void){	unlink(SOCKNAME); }
 
@@ -73,8 +75,11 @@ int main(void){
 			}
 			case M_READNF:
 			{
-				int err_no_ent = ENOENT;
-				SYSCALL_EXIT(msend(nfd, &msg, M_ERR, "msend - 1", "msend - 2", sizeof(errno), &err_no_ent), "msend");
+				/* Ignores fileno */
+				bool modified = false;
+				SYSCALL_EXIT(msend(nfd, &msg, M_GETF, "msend - 1", "msend - 2", READNF_PSIZE, READNF_PATH, READF_DSIZE, READF_DATA, sizeof(bool), &modified), "msend");
+				SYSCALL_EXIT(msend(nfd, &msg, M_GETF, "msend - 1", "msend - 2", EXPEL_PSIZE, EXPEL_PATH, EXPEL_DSIZE, EXPEL_DATA, sizeof(bool), &modified), "msend");
+				SYSCALL_EXIT(msend(nfd, &msg, M_OK, "msend - 1", "msend - 2"), "msend");
 				printf("Reading N files operation done\n");
 				break;
 			}
