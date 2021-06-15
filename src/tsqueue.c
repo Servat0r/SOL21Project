@@ -31,9 +31,8 @@ static bool iterShouldWait(tsqueue_t* q){
  * @return Pointer to tsqueue_t object on success, NULL on error.
 */
 tsqueue_t* tsqueue_init(void){
-	tsqueue_t* q;
-
-	MALLOC_MSET(q, sizeof(tsqueue_t), 0);
+	tsqueue_t* q = malloc(sizeof(tsqueue_t));
+	if (!q) return NULL;
 	MTX_INIT(&q->lock, NULL);
 	CD_INIT(&q->pushVar, NULL);
 	CD_INIT(&q->popVar, NULL);
@@ -300,7 +299,6 @@ int	tsqueue_iter_next(tsqueue_t* q, void** elem){
 	*elem = q->iter->elem;
 	q->iter = q->iter->next;
 	UNLOCK(&q->lock);
-
 	return 0;
 }
 

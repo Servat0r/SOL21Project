@@ -295,9 +295,9 @@ char* printOptParseError(int err){
  * @return A LinkedList of optval_t objects each one containing a (correctly) parsed
  * option and all its found arguments as another LinkedList. All this object is HEAP-
  * allocated and must be freed with a llist_destroy({name of list}, optval_destroy)
- * when no more used. By default, if a unique option is found a second time, it is
- * discarded (i.e., only the first occurrence is retained). On error, this function
- * returns NULL as if parsing has never started.
+ * when no more used. 
+ * @note By default, if a unique option is found a second time, this function fails.
+ * @note On error, this function returns NULL as if parsing has never started.
  */
 llist_t* parseCmdLine(int argc, char* argv[], const optdef_t options[], const int optlen){
 	if (!argv || !options || (optlen < 0) || (argc < 0)) return NULL;
@@ -340,13 +340,19 @@ llist_t* parseCmdLine(int argc, char* argv[], const optdef_t options[], const in
 				}
 				if (opt) llist_push(uniques, opt->def);
 			}
-			if (opt) llist_push(result, opt); /* opt == NULL here <=> a duplicated unique option has been detected */
-			argc -= ret;
-			index += ret;
+			if (opt){
+				llist_push(result, opt);
+				argc -= ret;
+				index += ret;
+			} else { /* opt == NULL here <=> a duplicated unique option has been detected and so we return NULL */
+				llist_destroy(result, optval_destroy);
+				result = NULL;
+				break;
+			}
 		}
 	}
 	llist_destroy(uniques, dummy); /* No assumption can be made on 'options' elements allocation */
-	return result;
+	return (result ? result : NULL);
 }
 
 

@@ -55,20 +55,21 @@ int loadFile(const char* pathname, void** buf, size_t* size){
 
 
 /**
- * @brief Saves a file with (absolute) path #pathname into the
- * directory #dirname, or does nothing if any of #basedir or
- * #pathname is NULL.
+ * @brief Saves a file with (absolute) path pathname into the
+ * directory dirname, or does nothing if any of basedir or
+ * pathname is NULL.
  * @param pathname -- An absolute pathname.
  * @param basedir -- Directory in which to replicate the path
- * given by #pathname for saving file.
- * @return 0 on success, -1 on error (errno set), 1 if any of
- * #pathname/#basedir is NULL.
+ * given by pathname for saving file.
+ * @return 0 on success, -1 on error (errno set) or if pathname
+ * is NULL, 1 if basedir is NULL (no operation performed).
  * Possible errors are:
  *	- EINVAL: content is NULL;
  *	- any error returned by malloc/strncpy/strncat/open/write.
  */
 int saveFile(const char* pathname, const char* basedir, void* content, size_t size){
-	if (!basedir || !pathname) return 1;
+	if (!pathname) return -1;
+	if (!basedir) return 1;
 	char* pathcopy = malloc(strlen(pathname) + 1);
 	if (!pathcopy) return -1;
 	strncpy(pathcopy, pathname, strlen(pathname) + 1);
@@ -106,33 +107,37 @@ int saveFile(const char* pathname, const char* basedir, void* content, size_t si
  * @param n -- Number of files to retrieve (all if n <= 0).
  * @param filelist -- Address of a llist_t* variable in which to "write"
  * all found files.
+ * @note filelist MUST NOT refer to already allocated memory,
+ * otherwise it will be lost.
+ * @note In is assumed that "nomedir" refers to an ALREADY existing
+ * directory, otherwise it makes no sense to create an empty directory
+ * and scan it.
  * @return 0 on success and *filelist will be a linkedlist of all
  * (regular) files found, -1 on error.
  */
-int dirscan(const char nomedir[], int n, llist_t** filelist) {
+int dirscan(const char nomedir[], long n, llist_t** filelist) {
 	if (!nomedir || !filelist){
 		errno = EINVAL;
 		return -1;
 	}
-
-
-	int i = 0;
-
+	
+	long i = 0;
     struct stat statbuf;
     
     llist_t* dlist = llist_init();
     if (!dlist) return -1;
     llist_t* flist = llist_init();
-    if (!flist){ free(flist); return -1; }
+    if (!flist){ llist_destroy(dlist, dummy); return -1; }
     
     char* currentdir = realpath(nomedir, NULL);
-    //char* absdirpath = malloc(MAXPATHSIZE * CHSIZE);
-    if (!currentdir) return -1;
-   	
+    if (!currentdir){
+    	llist_destroy(dlist, dummy);
+    	llist_destroy(flist, dummy);
+    	return -1;
+	}
    	
 	llist_push(dlist, currentdir);
 	
-   	
    	int ret = 0;
    	
    	while (dlist->size > 0){
@@ -140,12 +145,12 @@ int dirscan(const char nomedir[], int n, llist_t** filelist) {
    		if (ret == -1){
    			fprintf(stderr, "Error while retrieving dir %s item into the queue\n", currentdir);
    			free(currentdir);
-   			break;
-   		} else if (ret == 1) break;
+   			break; /* Both lists shall be destroyed after while loop */
+   		} else if (ret == 1) break; /* No more items */
 		if ((ret=stat(currentdir,&statbuf)) == -1) {
 			perror("stat");
 			free(currentdir);
-			break;
+			break; /* Both lists shall be destroyed after while loop */
 		}
 		if(S_ISDIR(statbuf.st_mode)) {
 			DIR * dir;
@@ -153,7 +158,7 @@ int dirscan(const char nomedir[], int n, llist_t** filelist) {
 				perror("opendir");
 				free(currentdir);
 				ret = -1;
-				break;
+				break; /* dir does NOT need to be closed */
 			} else {
 				struct dirent *file;    
 				while((errno=0, file = readdir(dir)) != NULL) {
@@ -162,7 +167,7 @@ int dirscan(const char nomedir[], int n, llist_t** filelist) {
 					if (!filename){
 						free(filename);
 						ret = -1;
-						break;
+						break; /* dir shall be closed after while loop */
 					}
 					memset(filename, 0, MAXPATHSIZE);
 					int len1 = strlen(currentdir);

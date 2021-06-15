@@ -4,7 +4,7 @@
 #include <defines.h>
 #include <linkedlist.h> 
 
-int dirscan(const char nomedir[], int n, llist_t** filelist);
+int dirscan(const char nomedir[], long n, llist_t** filelist);
 
 int loadFile(const char* pathname, void** buf, size_t* size);
 
