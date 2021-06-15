@@ -1,7 +1,7 @@
 /**
  * @brief Implementation of che client-server API.
  *
- * NOTE: In ALL functions that exchange messages with the server, we guarantee that either:
+ * @note In ALL functions that exchange messages with the server, we guarantee that either:
  *	1) The server ALWAYS sends back a message M_OK/M_ERR for indicating that operation has completed;
  *	2) The server has prematurely closed connection and so a msg_recv reads EOF from server,
  *	thus invalidating ALL the subsequent content and the corresponding calling function fails.
@@ -84,6 +84,27 @@ static int result_msg(int result, char* msg, size_t size){
 	}
 	return 0;
 }
+
+
+/**
+ * @brief Utility macro for getting absolute path.
+ * @param apiFunc -- API function that needs absolute path.
+ * @param pathname -- Given pathname by caller
+ * @param realFilePath -- Pointer to STACK-allocated array
+ * of size MAXPATHSIZE that shall contain absolute path.
+ * @note This macro does also zeroing of realFilePath.
+ */
+#define GET_ABS_PATH(apiFunc, pathname, realFilePath) \
+do{\
+	memset(*realFilePath, 0, sizeof(*realFilePath));\
+	if (!realpath(pathname, *realFilePath)){\
+		int errno_copy = errno;\
+		fprintf(stderr, "%s: while getting absolute path:", #apiFunc);\
+		errno = errno_copy;\
+		perror(NULL);\
+		return -1;\
+	}\
+} while(0);
 
 
 /**
@@ -264,7 +285,7 @@ int closeConnection(const char* sockname){
 
 /**
  * @brief Tries to open a file in the server with the absolute path #pathname.
- * @param pathname -- Absolute path of the file to open.
+ * @param pathname -- Path of the file to open.
  * @param flags -- Specifies additional behaviour: if (flags & O_CREATE), it tries to
  * create a new file in the server with that pathname; if (flags & O_LOCK), it tries to
  * open a file in locked-mode, i.e. no other one can read or write on this file: if file
@@ -293,10 +314,14 @@ int openFile(const char* pathname, int flags){
 		perror("openFile");		
 		return -1;
 	}
+
+	/* Getting absolute path */
+	char realFilePath[MAXPATHSIZE];
+	GET_ABS_PATH(openFile, pathname, &realFilePath);		
 	
 	/* Creates message and sends to server; if there is an error, we would be able to free any other resource before exiting the client */
 	SYSCALL_RETURN(msend(serverfd, &msg, M_OPENF, "openFile: while creating message to send", 
-		"openFile: while creating message to send", strlen(pathname) + 1, pathname, sizeof(int), &flags), -1, NULL);
+		"openFile: while creating message to send", strlen(realFilePath) + 1, realFilePath, sizeof(int), &flags), -1, NULL);
 
 	/* Decodes message */
 	while (true){
@@ -305,12 +330,12 @@ int openFile(const char* pathname, int flags){
 			"openFile: while receiving message from server"), -1, NULL);
 		if (msg->type == M_ERR){
 			int error = *((int*)msg->args[0].content); /* Error on server */
-			PRINT_OP_SIMPLE(openFile, pathname, error);
+			PRINT_OP_SIMPLE(openFile, realFilePath, error);
 			errno = EBADE;
 			res = -1;
 			break;
 		} else if (msg->type == M_OK){
-			PRINT_OP_SIMPLE(openFile, pathname, 0);
+			PRINT_OP_SIMPLE(openFile, realFilePath, 0);
 			res = 0;
 			break;
 		} else { /* Bad message */
@@ -350,10 +375,14 @@ int closeFile(const char* pathname){
 		perror("closeFile");		
 		return -1;
 	}
+	
+	/* Getting absolute path */
+	char realFilePath[MAXPATHSIZE];
+	GET_ABS_PATH(closeFile, pathname, &realFilePath);	
 
 	/* Creates message and sends to server */
 	SYSCALL_RETURN(msend(serverfd, &msg, M_CLOSEF, "closeFile: while creating message to send", 
-		"closeFile: while creating message to send", strlen(pathname) + 1, pathname), -1, NULL);
+		"closeFile: while creating message to send", strlen(realFilePath) + 1, realFilePath), -1, NULL);
 
 	/* Decodes message */
 	while (true){
@@ -362,12 +391,12 @@ int closeFile(const char* pathname){
 			"closeFile: while receiving message from server"), -1, NULL);
 		if (msg->type == M_ERR){
 			int error = *((int*)msg->args[0].content); /* Error on server */
-			PRINT_OP_SIMPLE(closeFile, pathname, error);
+			PRINT_OP_SIMPLE(closeFile, realFilePath, error);
 			errno = EBADE;
 			res = -1;
 			break;
 		} else if (msg->type == M_OK){
-			PRINT_OP_SIMPLE(closeFile, pathname, 0);
+			PRINT_OP_SIMPLE(closeFile, realFilePath, 0);
 			res = 0;
 			break;
 		} else { /* Bad message */
@@ -407,8 +436,12 @@ int readFile(const char* pathname, void** buf, size_t* size){
 		return -1;
 	}
 
+	/* Getting absolute path */
+	char realFilePath[MAXPATHSIZE];
+	GET_ABS_PATH(readFile, pathname, &realFilePath);
+
 	SYSCALL_RETURN(msend(serverfd, &msg, M_READF, "readFile: while creating message to send",
-		"readFile: while sending message to server", strlen(pathname) + 1, pathname), -1, "readFile: msend");
+		"readFile: while sending message to server", strlen(realFilePath) + 1, realFilePath), -1, "readFile: msend");
 	
 	size_t rbytes = 0; /* For stats printing */
 	while (true){
@@ -416,12 +449,12 @@ int readFile(const char* pathname, void** buf, size_t* size){
 			"readFile: while receiving message from server"), -1, "readFile: mrecv");
 		if (msg->type == M_ERR){
 			int error = *((int*)msg->args[0].content); /* Error on server */
-			PRINT_OP_RD(readFile, pathname, error, rbytes);
+			PRINT_OP_RD(readFile, realFilePath, error, rbytes);
 			errno = EBADE;
 			res = -1;
 			break;
 		} else if (msg->type == M_OK){
-			PRINT_OP_RD(readFile, pathname, 0, rbytes);
+			PRINT_OP_RD(readFile, realFilePath, 0, rbytes);
 			res = 0;
 			break;
 		} else if ((msg->type == M_GETF) && !frecv){
@@ -471,20 +504,24 @@ int appendToFile(const char* pathname, void* buf, size_t size, const char* dirna
 		return -1;
 	}
 
+	/* Getting absolute path */
+	char realFilePath[MAXPATHSIZE];
+	GET_ABS_PATH(appendToFile, pathname, &realFilePath);
+
 	SYSCALL_RETURN(msend(serverfd, &msg, M_APPENDF, "appendToFile: while creating message to send", 
-		"appendToFile: while sending message to server", strlen(pathname)+1, pathname, size, buf), -1, NULL);
+		"appendToFile: while sending message to server", strlen(realFilePath)+1, realFilePath, size, buf), -1, NULL);
 	
 	while (true){
 		SYSCALL_RETURN(mrecv(serverfd, &msg, "appendToFile: while creating data to receive message",
 			"appendToFile: while receiving message from server"), -1, NULL);
 		if (msg->type == M_ERR){
 			int error = *((int*)msg->args[0].content); /* Error on server */
-			PRINT_OP_WR(appendToFile, pathname, error, 0); /* No data written */
+			PRINT_OP_WR(appendToFile, realFilePath, error, 0); /* No data written */
 			errno = EBADE;
 			res = -1;
 			break;
 		} else if (msg->type == M_OK){
-			PRINT_OP_WR(appendToFile, pathname, 0, size); /* All data written */
+			PRINT_OP_WR(appendToFile, realFilePath, 0, size); /* All data written */
 			res = 0;
 			break;
 		} else if (msg->type == M_GETF){
@@ -536,8 +573,12 @@ int writeFile(const char* pathname, const char* dirname){
 		return -1;
 	}
 
+	/* Getting absolute path */
+	char realFilePath[MAXPATHSIZE];
+	GET_ABS_PATH(writeFile, pathname, &realFilePath);		
+
 	SYSCALL_RETURN(msend(serverfd, &msg, M_WRITEF, "writeFile: while creating message to send", 
-		"writeFile: while sending message to server", strlen(pathname)+1, pathname, size, content), -1, NULL);
+		"writeFile: while sending message to server", strlen(realFilePath)+1, realFilePath, size, content), -1, NULL);
 
 	free(content); /* Loaded on heap by loadFile */
 	while (true){
@@ -545,12 +586,12 @@ int writeFile(const char* pathname, const char* dirname){
 			"writeFile: while receiving message from server"), -1, NULL);
 		if (msg->type == M_ERR){
 			int error = *((int*)msg->args[0].content); /* Error on server */
-			PRINT_OP_WR(writeFile, pathname, error, 0); /* No data written */
+			PRINT_OP_WR(writeFile, realFilePath, error, 0); /* No data written */
 			errno = EBADE;
 			res = -1;
 			break;
 		} else if (msg->type == M_OK){
-			PRINT_OP_WR(writeFile, pathname, 0, size); /* All data written */
+			PRINT_OP_WR(writeFile, realFilePath, 0, size); /* All data written */
 			res = 0;
 			break;
 		} else if (msg->type == M_GETF){
@@ -676,8 +717,13 @@ int lockFile(const char* pathname){
 		return -1;
 	}
 
+	/* Getting absolute path */
+	char realFilePath[MAXPATHSIZE];
+	GET_ABS_PATH(lockFile, pathname, &realFilePath);		
+
+
 	SYSCALL_RETURN(msend(serverfd, &msg, M_LOCKF, "lockFile: while creating message to send", 
-		"lockFile: while creating message to send", strlen(pathname)+1, pathname), -1, NULL);
+		"lockFile: while creating message to send", strlen(realFilePath)+1, realFilePath), -1, NULL);
 
 	/* Decodes message */
 	while (true){
@@ -686,12 +732,12 @@ int lockFile(const char* pathname){
 			"lockFile: while receiving message from server"), -1, NULL);
 		if (msg->type == M_ERR){
 			int error = *((int*)msg->args[0].content); /* Error on server */
-			PRINT_OP_SIMPLE(lockFile, pathname, error);
+			PRINT_OP_SIMPLE(lockFile, realFilePath, error);
 			errno = EBADE;
 			res = -1;
 			break;
 		} else if (msg->type == M_OK){
-			PRINT_OP_SIMPLE(unlockFile, pathname, 0);
+			PRINT_OP_SIMPLE(lockFile, realFilePath, 0);
 			res = 0;
 			break;
 		} else { /* Bad message */
@@ -708,7 +754,7 @@ int lockFile(const char* pathname){
 
 /**
  * @brief Resets the O_LOCK flag to the file identified
- * by #pathname in the file storage server. This operation
+ * by pathname in the file storage server. This operation
  * succeeds iff O_LOCK flag is owned by the calling client.
  * @return 0 on success, -1 on error.
  * Possible errors are:
@@ -736,9 +782,13 @@ int unlockFile(const char* pathname){
 		return -1;
 	}
 
+	/* Getting absolute path */
+	char realFilePath[MAXPATHSIZE];
+	GET_ABS_PATH(unlockFile, pathname, &realFilePath);		
+
 	/* Creates message and sends to server */
 	SYSCALL_RETURN(msend(serverfd, &msg, M_UNLOCKF, "unlockFile: while creating message to send", 
-		"unlockFile: while creating message to send", strlen(pathname)+1, pathname), -1, NULL);
+		"unlockFile: while creating message to send", strlen(realFilePath)+1, realFilePath), -1, NULL);
 
 	/* Decodes message */
 	while (true){
@@ -747,12 +797,12 @@ int unlockFile(const char* pathname){
 			"unlockFile: while receiving message from server"), -1, NULL);
 		if (msg->type == M_ERR){
 			int error = *((int*)msg->args[0].content); /* Error on server */
-			PRINT_OP_SIMPLE(unlockFile, pathname, error);
+			PRINT_OP_SIMPLE(unlockFile, realFilePath, error);
 			errno = EBADE;
 			res = -1;
 			break;
 		} else if (msg->type == M_OK){
-			PRINT_OP_SIMPLE(unlockFile, pathname, 0);
+			PRINT_OP_SIMPLE(unlockFile, realFilePath, 0);
 			res = 0;
 			break;
 		} else { /* Bad message */
@@ -794,9 +844,13 @@ int removeFile(const char* pathname){
 		return -1;
 	}
 
+	/* Getting absolute path */
+	char realFilePath[MAXPATHSIZE];
+	GET_ABS_PATH(removeFile, pathname, &realFilePath);		
+
 	/* Creates message and sends to server */
 	SYSCALL_RETURN(msend(serverfd, &msg, M_REMOVEF, "removeFile: while creating message to send", 
-		"removeFile: while creating message to send", strlen(pathname)+1, pathname), -1, NULL);
+		"removeFile: while creating message to send", strlen(realFilePath)+1, realFilePath), -1, NULL);
 
 	/* Decodes message */
 	while (true){
@@ -805,12 +859,12 @@ int removeFile(const char* pathname){
 			"removeFile: while receiving message from server"), -1, NULL);
 		if (msg->type == M_ERR){
 			int error = *((int*)msg->args[0].content); /* Error on server */
-			PRINT_OP_SIMPLE(removeFile, pathname, error);
+			PRINT_OP_SIMPLE(removeFile, realFilePath, error);
 			errno = EBADE;
 			res = -1;
 			break;
 		} else if (msg->type == M_OK){
-			PRINT_OP_SIMPLE(removeFile, pathname, 0);
+			PRINT_OP_SIMPLE(removeFile, realFilePath, 0);
 			res = 0;
 			break;
 		} else { /* Bad message */

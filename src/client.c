@@ -392,7 +392,10 @@ int client_run(llist_t* optvals, long msec_delay){
 					if ( strequal(nextOpt->def->name, "-D") ) dirname = (char*)(nextOpt->args->head->datum); /* -D dirname */
 				}
 				if (optname[1] == 'w') ret = w_handler(opt, dirname);
-				else { MULTIARG_TRANSACTION_HANDLER(writeFile, opt->args, dirname, (O_CREATE | O_LOCK), &ret); }
+				else {
+					 
+					MULTIARG_TRANSACTION_HANDLER(writeFile, opt->args, dirname, (O_CREATE | O_LOCK), &ret);
+				}
 				break;
 			}
 			
