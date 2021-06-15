@@ -163,8 +163,8 @@ int openConnection(const char* sockname, int msec, const struct timespec abstime
 	itsp.it_interval.tv_nsec = 0;
 	
 	int res, tfd; /* Result of successive connect/poll calls; timer file descriptor */
-	struct pollfd pfd;
-	memset(&pfd, 0, sizeof(pfd));
+	struct pollfd pfd[1];
+	memset(pfd, 0, sizeof(pfd));
 	
 	/* An error in socket guarantees to write '-1' in serverfd and to maintain the semantics of "-1 == unexisting socket" */
 	SYSCALL_RETURN((serverfd = socket(AF_UNIX, SOCK_STREAM, 0)), -1, "openConnection: while creating socket");
@@ -181,12 +181,13 @@ int openConnection(const char* sockname, int msec, const struct timespec abstime
 		serverfd = -1;
 		return -1;
 	}
-	pfd.fd = tfd;
-	pfd.events = POLLOUT;
-	pfd.revents = 0;
+	pfd[0].fd = tfd;
+	pfd[0].events = POLLIN;
+	pfd[0].revents = 0;
 	res = timerfd_settime(tfd, TFD_TIMER_ABSTIME, &itsp, NULL);
 	if (res == 0){
 		while (true){
+			pfd[0].revents = 0;
 			res = connect(serverfd, &serverAddr, UNIX_PATH_MAX);
 			/* SUCCESS */
 			if (res == 0){
@@ -204,12 +205,13 @@ int openConnection(const char* sockname, int msec, const struct timespec abstime
 				3. There is no listening socket with that address (e.g. server has not started yet). 
 			*/
 			} else if ((errno == EAGAIN) || (errno == EALREADY) || (errno == ENOENT)){
-				res = poll(&pfd, 1, msec);
+				res = poll(pfd, 1, msec);
 				if (res == 1){ /* Timeout expired , pfd.revents & POLLIN*/
 					errno = ETIMEDOUT;
 					perror("openConnection: while waiting for connecting");
 					break;
-				} else continue; /* No notification by timer */
+				} else if (res == 0) continue; /* No notification by timer */
+				else perror("openConnection: poll");
 				/* Now we are exiting and closing serverfd, so if connection has been established in the middle of timeout it will be reset */
 			} else {
 				perror("openConnection: while trying to connect");
@@ -523,8 +525,9 @@ int writeFile(const char* pathname, const char* dirname){
 	}
 
 	SYSCALL_RETURN(msend(serverfd, &msg, M_WRITEF, "writeFile: while creating message to send", 
-		"writeFile: while sending message to server", strlen(pathname)+1, size, content), -1, NULL);
+		"writeFile: while sending message to server", strlen(pathname)+1, pathname, size, content), -1, NULL);
 
+	free(content); /* Loaded on heap by loadFile */
 	while (true){
 		SYSCALL_RETURN(mrecv(serverfd, &msg, "writeFile: while creating data to receive message",
 			"writeFile: while receiving message from server"), -1, NULL);

@@ -5,8 +5,43 @@
  */
 #include <defines.h>
 #include <util.h>
+#include <dir_utils.h>
 #include <client_server_API.h>
 #include <argparser.h>
+
+
+/* Some cmdline parsing and option-checking error messages */
+#define Rrd_INCONSISTENCY_MESSAGE "A '-d' option could be provided only as first option after a '-R' or '-r' one"
+#define WwD_INCONSISTENCY_MESSAGE "A '-D' option could be provided only as first option after a '-W' or '-w' one"
+#define ATLEAST_ONE_MESSAGE "You must provide at least one command-line argument"
+#define F_NOTGIVEN_MESSAGE "You must provide a socket file path to connect with"
+#define T_NEGATIVE_MESSAGE "You must provide a non-negative request-delay time"
+/* Message to print on error in client_run while executing an option */
+#define EXEC_OPT_ERRMSG(x) fprintf(stderr, "client_run: while executing option '%s'\n", x);
+#define OPENCONN_FAILMSG "Failed to open connection with server"
+#define CLOSECONN_FAILMSG "Failed to close connection with server"
+
+/* Parameters for openConnection */
+#define MSEC_DELAY_OPENCONN 250 /* Milliseconds between two attempts to connect */
+#define SEC_MAXTIME_OPENCONN 5 /* (Entire) seconds that should last after openConnection failure */
+#define NSEC_MAXTIME_OPENCONN 0 /* Nanoseconds (after above seconds) that should last after openConnection failure */
+
+
+/**
+ * @brief Utility macro that checks if a condition is true
+ * and otherwise destroys argparser result and exits.
+ * @note cond shall be a condition suitable for an 'if'
+ * statement and optvals shall be the list returned by
+ * the argparser and errmsg is an error message.
+ */
+#define CHECK_COND_DEALLOC_EXIT(cond, optvals, errmsg) \
+do { \
+	if ( !(cond) ){ \
+		fprintf(stderr, "%s\n", (errmsg ? errmsg : "An error occurred") ); \
+		llist_destroy(optvals, optval_destroy); \
+		exit(EXIT_FAILURE); \
+	} \
+} while(0);
 
 
 /**
@@ -17,15 +52,16 @@
  * function return EXIT_FAILURE.
  * @note This macro processes correctly ONLY a list of char*.
  */
-#define MULTIARG_LUC_HANDLER(apiFunc, args) \
+#define MULTIARG_SIMPLE_HANDLER(apiFunc, args, ret) \
 do { \
+	*ret = 0; \
 	llistnode_t* node; \
 	char* filename; \
 	llist_foreach(args, node){ \
 		filename = (char*)(node->datum); \
 		if ((apiFunc(filename) == -1) && (errno != EBADE)){ \
 			perror(#apiFunc); \
-			return EXIT_FAILURE; \
+			*ret = -1;\
 		} \
 	} \
 } while(0);
@@ -38,39 +74,37 @@ do { \
  * with locking permissions, then write file, then close file and
  * releases lock if file was opened/created in locked mode.
  */
-#define MULTIARG_Ww_TRANSACTION_HANDLER(apiFunc, args, dirname, openFlags, ret) \
+#define MULTIARG_TRANSACTION_HANDLER(apiFunc, args, dirname, openFlags, ret) \
 do {\
 	llistnode_t* node;\
 	char* filename;\
 	*ret = 0; \
 	llist_foreach(args, node){\
 		filename = (char*)(node->datum);\
-		else {\
-			if (openFile(filename, openFlags) == -1) {\
+		if (openFile(filename, openFlags) == -1) {\
+			if (errno != EBADE) {\
+				perror("openFile");\
+				*ret = -1;\
+				break;\
+			}\
+		} else if (apiFunc(filename, dirname) == -1) {\
+			if (errno != EBADE) {\
+				perror(#apiFunc);\
+				*ret = -1;\
+				break;\
+			}\
+		} else if (closeFile(filename) == -1) {\
+			if (errno != EBADE) {\
+				perror("closeFile");\
+				*ret = -1;\
+				break;\
+			}\
+		} else if (openFlags & O_LOCK){\
+			if (unlockFile(filename) == -1){\
 				if (errno != EBADE) {\
-					perror("openFile");\
+					perror("unlockFile");\
 					*ret = -1;\
 					break;\
-				}\
-			} else if (apiFunc(filename, dirname) == -1) {\
-				if (errno != EBADE) {\
-					perror(#apiFunc);\
-					*ret = -1;\
-					break;\
-				}\
-			} else if (closeFile(filename) == -1) {\
-				if (errno != EBADE) {\
-					perror("closeFile");\
-					*ret = -1;\
-					break;\
-				}\
-			} else if (openFlags & O_LOCK){\
-				if (unlockFile() == -1){\
-					if (errno != EBADE) {\
-						perror("unlockFile");\
-						*ret = -1;\
-						break;\
-					}\
 				}\
 			}\
 		}\
@@ -78,22 +112,15 @@ do {\
 } while(0);
 
 
-/* Some cmdline parsing and option-checking error messages */
-#define Rrd_INCONSISTENCY_MESSAGE "A '-d' option could be provided only as first option after a '-R' or '-r' one"
-#define WwD_INCONSISTENCY_MESSAGE "A '-D' option could be provided only as first option after a '-W' or '-w' one"
-#define ATLEAST_ONE_MESSAGE "You must provide at least one command-line argument"
 
 
 /**
  * @brief Utility macro for setting values of the
  * global variables below for -h/-p/-t/-f options.
  */
-#define OPT_SETATTR(optval, string, opt, value) \
+#define OPT_SETATTR(optval, string, opt) \
 	do { \
-		if ( streq(string, optval->def->name) ){ \
-			*opt = true; \
-			if (value) *value = optval->args->head->datum; \
-		} \
+		if ( strequal(string, optval->def->name) ) *opt = true; \
 	} while (0);
 
 
@@ -136,34 +163,44 @@ otherwise an error is raised; if this option is not specified at least once, all
 };
 
 /* Length of options array */
-const int optlen = 12;
+const int optlen = 13;
 
 /**
  * @brief Global variables for saving whether unique options 
  * have been provided or not and their values (if any)
  */
-bool h_opt = false;
-bool f_opt = false;
+bool h_val = false;
 char* f_path = NULL;
-bool t_opt = false;
-int t_val = 0;
+long t_val = 0;
 
 
 /**
  * @brief Checks if options -h/-p/-f/-t are provided and sets
- * corresponding global variables above.
+ * corresponding parameters passed. 
  * @return 0 on success, -1 on error (optvals == NULL).
  */
-int check_phft(llist_t* optvals){
+int check_phft(llist_t* optvals, bool* h_val, char** f_path, long* t_val){
 	if (!optvals) return -1;
 	llistnode_t* node;
 	optval_t* optval;
+	char* optname;
+	*h_val = false;
+	*f_path = NULL;
+	*t_val = 0;
+	char* t_str = NULL;
 	llist_foreach(optvals, node){
-		optval = ((optval_t*)node->datum); 
-		OPT_SETATTR(optval, "-h", &h_opt, NULL);
-		OPT_SETATTR(optval, "-p", &prints_enabled, NULL);		
-		OPT_SETATTR(optval, "-f", &f_opt, &f_path);
-		OPT_SETATTR(optval, "-t", &t_opt, &t_val);
+		optval = ((optval_t*)node->datum);
+		optname = (char*)(optval->def->name);
+		switch(optname[1]){
+			case 'h': { *h_val = true; break; }
+			case 'p' : { prints_enabled = true; break; }
+			case 'f' : {*f_path = (char*)(optval->args->head->datum); break; }
+			case 't' : {t_str = (char*)(optval->args->head->datum); break; }
+			default : continue;
+		}
+	}
+	if (t_str && getInt(t_str, t_val) != 0){
+		return -1;
 	}
 	return 0;
 }
@@ -175,7 +212,7 @@ int check_phft(llist_t* optvals){
  * 	- for each '-D' option provided, the preceeding one is in {'-W', '-w'}.
  * @return 0 on success, -1 on error (optvals == NULL), 1 if there is no such consistency.
  */
-int check_rwConsistency(llits_t* optvals){
+int check_rwConsistency(llist_t* optvals){
 	if (!optvals) return -1;
 	bool foundRr = false; /* true <=> current option is in {-R, -r}; set to false on next option scanning */
 	bool foundWw = false; /* true <=> current option is in {-W, -w}; set to false on next option scanning */
@@ -184,21 +221,21 @@ int check_rwConsistency(llits_t* optvals){
 	size_t n;
 	llist_foreach(optvals, node){
 		def = ((optval_t*)node->datum)->def;
-		if (streq(def->name, "-d")){ /* This -d is NOT preceeded by a -r/-R */
+		if (strequal(def->name, "-d")){ /* This -d is NOT preceeded by a -r/-R */
 			if (foundWw || !foundRr){
-				fprintf(stderr, Rrd_INCONSISTENCY_MESSAGE);
+				fprintf(stderr, "%s\n", Rrd_INCONSISTENCY_MESSAGE);
 				return 1;
 			}
-		} else if (streq(def->name, "-D")){ /* This -D is NOT preceeded by a -w/-W */
+		} else if (strequal(def->name, "-D")){ /* This -D is NOT preceeded by a -w/-W */
 			if (foundRr || !foundWw){
-				fprintf(stderr, WwD_INCONSISTENCY_MESSAGE);
+				fprintf(stderr, "%s\n", WwD_INCONSISTENCY_MESSAGE);
 				return 1;
 			}
-		} else if ( streq(def->name, "-r") || streq(def->name, "-R") ){
+		} else if ( strequal(def->name, "-r") || strequal(def->name, "-R") ){
 			foundWw = false;
 			foundRr = true;
 			continue;
-		} else if ( streq(def->name, "-w") || streq(def->name, "-W") ){
+		} else if ( strequal(def->name, "-w") || strequal(def->name, "-W") ){
 			foundRr = false;
 			foundWw = true;
 			continue;
@@ -235,7 +272,7 @@ int w_handler(optval_t* wopt, char* dirname){
 	int ret = 0;
 	/* On success, filelist shall contain HEAP-allocated ABSOLUTE paths. */
 	SYSCALL_RETURN(dirscan(nomedir, n, &filelist), -1, "w_handler: while scanning directory");
-	MULTIARG_Ww_TRANSACTION_HANDLER(writeFile, filelist, dirname, (O_CREATE | O_LOCK), &ret);
+	MULTIARG_TRANSACTION_HANDLER(writeFile, filelist, dirname, (O_CREATE | O_LOCK), &ret);
 	//TODO In teoria questo si potrebbe portare anche dentro la macro passando &filelist e settandolo NULL in caso di errore
 	if (ret == -1) llist_destroy(filelist, free);
 	return ret;
@@ -311,4 +348,146 @@ int r_handler(optval_t* ropt, char* dirname){
 	}
 	/* realFilePath and filebuf are ALWAYS freed here */
 	return ret;
+}
+
+/**
+ * @brief Command-line arguments execution after parsing and validation.
+ * @param optvals -- A linkedlist of optval_t objects pointers containing
+ * the result of command-line parsing.
+ * @param msec_delay -- Milliseconds time between each option execution
+ * (i.e., msec time between two different requests).
+ * @return 0 on success, -1 on error.
+ */
+int client_run(llist_t* optvals, long msec_delay){
+	if (!optvals) return -1;
+	llistnode_t* node;
+	optval_t* opt;
+	char* optname;
+	int ret = 0;
+	llist_foreach(optvals, node){
+		opt = (optval_t*)(node->datum);
+		optname = opt->def->name;
+		/*
+		 * Here we can assume that all options provided are of the form '-%c',
+		 * since this is the format of ALL ones we have passed to the parser.
+		*/
+		switch(optname[1]){
+			case 'h':
+			case 'p':
+			case 'f':
+			case 't':
+			case 'd':
+			case 'D':
+			{
+				continue;
+			}
+			case 'w': 
+			case 'W':
+			{
+				char* dirname = NULL; /* default */
+				if (node->next){ /* There is a subsequent option */
+					optval_t* nextOpt = (optval_t*)(node->next->datum);
+					if ( strequal(nextOpt->def->name, "-D") ) dirname = (char*)(nextOpt->args->head->datum); /* -D dirname */
+				}
+				if (optname[1] == 'w') ret = w_handler(opt, dirname);
+				else { MULTIARG_TRANSACTION_HANDLER(writeFile, opt->args, dirname, (O_CREATE | O_LOCK), &ret); }
+				break;
+			}
+			
+			case 'r': 
+			case 'R':
+			{
+				char* dirname = NULL; /* default */
+				if (node->next){ /* There is a subsequent option */
+					optval_t* nextOpt = (optval_t*)(node->next->datum);
+					if ( strequal(nextOpt->def->name, "-d") ) dirname = (char*)(nextOpt->args->head->datum); /* -d dirname */
+				}
+				if (optname[1] == 'r') ret = r_handler(opt, dirname);
+				else { /* -R */
+					long lN = 0;
+					int N = 0;
+					if (opt->args->size == 1){ /* N specified as arg */
+						ret = getInt((char*)(opt->args->head->datum), &lN);
+						if (ret != 0) ret = -1;
+					}
+					if (( ret == 0 ) && ( lN <= (long)(INT_MAX) )){
+						N = (int)lN;
+						ret = readNFiles(N, dirname); //TODO dirname
+						if ((ret == -1) && (errno == EBADE)) ret = 0; /* As other handlers */
+					}
+					/* with ret == -1, we do nothing */				
+				}
+				break;
+			}
+			
+			case 'l':
+			{
+				MULTIARG_SIMPLE_HANDLER(lockFile, opt->args, &ret);
+				break;
+			}
+			
+			case 'u':
+			{
+				MULTIARG_SIMPLE_HANDLER(unlockFile, opt->args, &ret);
+				break;
+			}
+			
+			case 'c':
+			{
+				MULTIARG_SIMPLE_HANDLER(removeFile, opt->args, &ret);
+				break;
+			}
+			
+			default: /* Theoretically impossible, but we consider it however */
+			{
+				fprintf(stderr, "Error while running command, unknown option got '%s'\n", optname);
+				break;
+			}
+		} /* end of switch */
+		if (ret == -1) EXEC_OPT_ERRMSG(optname);
+		if (errno != EBADE){
+			perror("client_run");
+			break;
+		}
+		usleep(1000 * msec_delay); /* delay between requests */
+	} /* end of llist_foreach */
+	return ret;
+}
+
+
+/* *********** MAIN FUNCTION NOW *********** */
+
+int main(int argc, char* argv[]){
+	if (argc < 2){
+		fprintf(stderr, ATLEAST_ONE_MESSAGE);
+		exit(EXIT_FAILURE);
+	}
+	struct timespec abstime;
+	memset(&abstime, 0, sizeof(abstime));
+	abstime.tv_sec = SEC_MAXTIME_OPENCONN;
+	abstime.tv_nsec = NSEC_MAXTIME_OPENCONN;
+	llist_t* optvals = parseCmdLine(argc, argv, options, optlen);
+	if (!optvals){
+		fprintf(stderr, "Error while parsing command-line arguments\n");
+		exit(EXIT_FAILURE);
+	}
+	printf("cmdline parsing successfully completed!\n");
+	CHECK_COND_DEALLOC_EXIT( (check_phft(optvals, &h_val, &f_path, &t_val) == 0), optvals, "Error while checking unique options");
+	CHECK_COND_DEALLOC_EXIT( (check_rwConsistency(optvals) == 0), optvals, "Error: options r/R/d or w/W/D are not provided correctly")
+	if (h_val){ /* Help option provided */
+		llist_destroy(optvals, optval_destroy);
+		print_help(argv[0], options, optlen);
+		return 0;		
+	}
+	CHECK_COND_DEALLOC_EXIT( (f_path), optvals, F_NOTGIVEN_MESSAGE);
+	CHECK_COND_DEALLOC_EXIT( (t_val >= 0), optvals, T_NEGATIVE_MESSAGE);
+	CHECK_COND_DEALLOC_EXIT( (openConnection(f_path, MSEC_DELAY_OPENCONN, abstime) == 0), optvals, OPENCONN_FAILMSG);
+	printf("Command execution is now starting\n"); /* Command validation completed */
+	int runResult = client_run(optvals, t_val);
+	if (runResult < 0) perror("client_run");
+	CHECK_COND_DEALLOC_EXIT( (runResult == 0), optvals, "Error while running commands");
+	CHECK_COND_DEALLOC_EXIT( (closeConnection(f_path) == 0), optvals, CLOSECONN_FAILMSG);
+	/* Dealloc and exit but with success */
+	llist_destroy(optvals, optval_destroy);	
+	return 0;
 }

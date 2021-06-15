@@ -6,11 +6,13 @@ http://didawiki.cli.di.unipi.it/lib/exe/fetch.php/informatica/sol/laboratorio21/
 
 `argparser.h` - Parser of command-line arguments.
 
+`client.c` - Client program.
+
 `client_server_API.h` - Given API for client communication with server.
 
 `config.h` - Header file for server configuration and config file parsing.
 
-`defines.h` - Common header files ( `stdio.h`, `stddef.h`, `stdlib.h`,`string.h`, `stdbool.h`, `errno.h`,`unistd.h`, `pthread.h`, `ctype.h` ) and macros definitions. 
+`defines.h` - Common header files ( `stdio.h`, `stddef.h`, `stdlib.h`,`string.h`, `stdbool.h`, `errno.h`,`unistd.h`, `pthread.h`, `ctype.h`, `limits.h` ) and macros definitions. 
 
 `dir_utils.h` - Utilities for loading and saving files in directories.
 

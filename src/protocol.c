@@ -169,6 +169,7 @@ int msg_destroy(message_t* msg, void (*freeArgs)(void*), void (*freeContent)(voi
 
 /**
  * @brief Sends the message msg to file descriptor fd.
+ * @note This function requires an ALREADY initialized message_t object.
  * @return 1 on success, -1 on error during a writen, 0 if a writen returned 0.
  * Possible errors are:
  *	- EBADMSG: a writen has returned 0 and so the message has not been completely sent;
@@ -284,7 +285,7 @@ int msend(int fd, message_t** msg, msg_t type, char* creatmsg, char* sendmsg, ..
 		if (creatmsg) perror(creatmsg); /* Pass them as NULL to avoid these printouts */ 
 		return -1;
 	}
-	
+	(*msg)->type = type;
 	(*msg)->argn = getArgn(type);
 	packet_t* p = calloc((*msg)->argn, sizeof(packet_t));
 	if (!p){
@@ -302,7 +303,6 @@ int msend(int fd, message_t** msg, msg_t type, char* creatmsg, char* sendmsg, ..
 	va_end(args);
 	
 	(*msg)->args = p;
-	
 	if (msg_send(*msg, fd) < 1){ /* Message not correctly sent */
 		if (sendmsg) perror(sendmsg);
 		int errno_copy = errno;
@@ -336,8 +336,9 @@ int mrecv(int fd, message_t** msg, char* creatmsg, char* recvmsg){
 	}
 	if (msg_recv(*msg, fd) < 1){ /* Message not correctly received */
 		int errno_copy = errno;
-		msg_destroy(*msg, NULL, NULL);
+		msg_destroy(*msg, nothing, nothing);
 		errno = errno_copy;
+		*msg = NULL; //FIXME Okay?
 		return -1;
 	}
 	return 0;

@@ -15,6 +15,7 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <ctype.h>
+#include <limits.h>
 
 #define GBVALUE 1048576 /* #KBs in 1 GB */
 #define MBVALUE 1024 /* #KBs in 1 MB */
@@ -27,6 +28,9 @@
 #define MAX(X, Y) ( (X) >= (Y) ? (X) : (Y));
 #define MIN(X, Y) ( (X) <= (Y) ? (X) : (Y));
 #define MKSTR(X) #X /* "Stringificator" */
+#define DBGLINE(func, line) do{ printf("[DEBUG] %s %d\n", #func, line); } while(0); /* Simple debugging for simple bugs */
+#define DBGSTR(str) printf("[DEBUG] %s = %s\n", #str, str);
+#define DBGINT(num) printf("[DEBUG] %s = %d\n", #num, num);
 
 /* *********** SYSTEM CALLS ERRORS HANDLING MACROS *********** */
 
