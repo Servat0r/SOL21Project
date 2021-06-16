@@ -30,18 +30,6 @@
 #define R_CREATE 1
 #define R_WRITE 2
 
-/**
- * @brief Enum that describes operation types:
- *	- OP_READ: read-only operation on files and filesystem;
- *	- OP_WRFILE: read-only operation on filesystem, read/write-operations on files;
- *	- OP_WRSTOR: read-write operation on filesystem and files.
- *	At any moment in time, there shall be:
- *	- either ANY number of threads executing an OP_RD operation and 
- *	at most ONE thread executing an OP_WRFILE operation;
- *	- or ONLY ONE thread executing an OP_WRSTOR operation.
- */
-typedef enum {OP_READ, OP_WRFILE, OP_WRSTOR } optype_t;
-
 
 /**
  * @brief Struct for hosting <size, content> couples for fs_readN.
@@ -85,11 +73,12 @@ fcontent_t*
 void
 	fcontent_destroy(fcontent_t* fc);
 
-int
-	/* Creation / Destruction */
-	fs_init(FileStorage_t* fs, int nbuckets, size_t storageCap, int maxFileNo, int maxclient),
-	fs_destroy(FileStorage_t* fs),
 
+	/* Creation / Destruction */
+	FileStorage_t* fs_init(int nbuckets, size_t storageCap, int maxFileNo, int maxclient);
+	int	fs_destroy(FileStorage_t* fs);
+
+int
 	/* Modifying operations */
 	fs_create(FileStorage_t* fs, char* pathname, int creator, bool locking, int (*waitHandler)(tsqueue_t* waitQueue)),
 	fs_clientCleanup(FileStorage_t* fs, int client, llist_t** newowners_list),

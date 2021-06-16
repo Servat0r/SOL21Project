@@ -252,15 +252,17 @@ int fs_op_downgrade(FileStorage_t* fs){
  * @param storageCap -- Byte-size storage capacity of fs.
  * @param maxFileNo -- File capacity of fs.
  * @param maxclient -- Initial maximum client identifier accepted by fs.
- * @return 0 on success, -1 on error.
+ * @return A FileStorage_t object pointer on success, NULL on error.
  * Possible errors are:
  *	- EINVAL: invalid arguments;
  *	- ENOMEM: unable to allocate internal data structures;
  *	- any error by pthread_mutex_init/destroy, by tsqueue_init/destroy and by
  *	icl_hash_create.
  */
-int	fs_init(FileStorage_t* fs, int nbuckets, size_t storageCap, int maxFileNo, int maxclient){
+FileStorage_t* fs_init(int nbuckets, size_t storageCap, int maxFileNo, int maxclient){
 	if ((storageCap == 0) || (maxFileNo <= 0) || (nbuckets <= 0) || (maxclient < 0)){ errno = EINVAL; return -1; }
+	FileStorage_t* fs = malloc(sizeof(FileStorage_t));
+	if (!fs) return NULL;
 	memset(fs, 0, sizeof(FileStorage_t));
 	fs->maxFileNo = maxFileNo;
 	fs->storageCap = storageCap;
@@ -272,18 +274,20 @@ int	fs_init(FileStorage_t* fs, int nbuckets, size_t storageCap, int maxFileNo, i
 	if (!fs->replQueue){
 		perror("While initializing FIFO replacement queue");
 		MTX_DESTROY(&fs->gblock);
+		free(fs);
 		errno = ENOMEM;
-		return -1;
+		return NULL;
 	}
 	fs->fmap = icl_hash_create(nbuckets, NULL, NULL);
 	if (!fs->fmap){
 		MTX_DESTROY(&fs->gblock);
 		/* Unavoidable memory leak */
 		SYSCALL_NOTREC(tsqueue_destroy(fs->replQueue, dummy), -1, "fs_init: while destroying FIFO replacement queue after error on initialization");
+		free(fs);
 		errno = ENOMEM;
-		return -1;
+		return NULL;
 	}
-	return 0;
+	return fs;
 }
 
 
@@ -755,6 +759,7 @@ int	fs_destroy(FileStorage_t* fs){
 	/* Unavoidable memory leak */
 	SYSCALL_NOTREC(tsqueue_destroy(fs->replQueue, free), -1, "fs_destroy: while destroying replacement queue");
 	memset(fs, 0, sizeof(FileStorage_t));
+	free(fs); //FIXME Sure memset + free?
 	return 0;
 }
 

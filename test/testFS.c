@@ -14,7 +14,6 @@
 
 #define __DEBUG
 
-FileStorage_t fs;
 
 pthread_mutex_t mtx = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
@@ -43,6 +42,7 @@ struct arg_s {
 	int who;
 	char* pathname;
 	int* waitClients;
+	FileStorage_t* fs;
 };
 
 
@@ -55,12 +55,13 @@ void* firstTest(struct arg_s* arg){
 	char inbuf[] = "Servator1";
 	char* buf;
 	size_t size;
-	assert(fs_create(&fs, arg->pathname, arg->who, false, &whandler_stub) == 0);
-	assert(fs_open(&fs, arg->pathname, arg->who, false) == -1);
-	assert(fs_write(&fs, arg->pathname, inbuf, 9, arg->who, false, &whandler_stub, &sbhandler_stub) == 0);
-	assert(fs_write(&fs, arg->pathname, inbuf, 9, arg->who, false, &whandler_stub, &sbhandler_stub) == 0);
-	assert(fs_read(&fs, arg->pathname, &buf, &size, arg->who) == 0);
-	assert(fs_close(&fs, arg->pathname, arg->who) == 0);
+	FileStorage_t* fs = ((struct arg_s*)arg)->fs;
+	assert(fs_create(fs, arg->pathname, arg->who, false, &whandler_stub) == 0);
+	assert(fs_open(fs, arg->pathname, arg->who, false) == -1);
+	assert(fs_write(fs, arg->pathname, inbuf, 9, arg->who, false, &whandler_stub, &sbhandler_stub) == 0);
+	assert(fs_write(fs, arg->pathname, inbuf, 9, arg->who, false, &whandler_stub, &sbhandler_stub) == 0);
+	assert(fs_read(fs, arg->pathname, &buf, &size, arg->who) == 0);
+	assert(fs_close(fs, arg->pathname, arg->who) == 0);
 	if (write(1, buf, size) == -1) perror("write");
 	free(buf);
 	return NULL;
@@ -72,21 +73,22 @@ void* secondTest(struct arg_s* arg){
 	char inbuf[] = "Servator2";
 	char* buf;
 	size_t size;
-	assert(fs_create(&fs, arg->pathname, arg->who, false, &whandler_stub) == -1);
+	FileStorage_t* fs = ((struct arg_s*)arg)->fs;
+	assert(fs_create(fs, arg->pathname, arg->who, false, &whandler_stub) == -1);
 	
 	pthread_mutex_lock(&mtx);
-	if (fs_open(&fs, arg->pathname, arg->who, false) == -1) perror("fs_open"); /* One will success and the other will give the 'EBADF' error */
+	if (fs_open(fs, arg->pathname, arg->who, false) == -1) perror("fs_open"); /* One will success and the other will give the 'EBADF' error */
 	pthread_mutex_unlock(&mtx);
 	
-	assert(fs_write(&fs, arg->pathname, inbuf, 9, arg->who, false, &whandler_stub, &sbhandler_stub) == 0);
-	assert(fs_read(&fs, arg->pathname, &buf, &size, arg->who) == 0);
+	assert(fs_write(fs, arg->pathname, inbuf, 9, arg->who, false, &whandler_stub, &sbhandler_stub) == 0);
+	assert(fs_read(fs, arg->pathname, &buf, &size, arg->who) == 0);
 
 	pthread_mutex_lock(&mtx);
 	if (write(1, buf, size) == -1) perror("write");
 	printf("\n");
 	pthread_mutex_unlock(&mtx);
 
-	fs_dumpfile(&fs, arg->pathname);
+	fs_dumpfile(fs, arg->pathname);
 	free(buf);
 	return NULL;
 }
@@ -97,11 +99,12 @@ void* thirdTest(struct arg_s* arg){
 	char inbuf[] = STRING;
 	char* buf;
 	size_t size;
-	assert(fs_create(&fs, arg->pathname, arg->who, false, &whandler_stub) == 0);
-	assert(fs_open(&fs, arg->pathname, arg->who, false) == -1);
-	assert(fs_write(&fs, arg->pathname, inbuf, 135, arg->who, false, &whandler_stub, &sbhandler_stub) == 0);
-	assert(fs_read(&fs, arg->pathname, &buf, &size, arg->who) == 0);
-	fs_close(&fs, arg->pathname, arg->who);
+	FileStorage_t* fs = ((struct arg_s*)arg)->fs;
+	assert(fs_create(fs, arg->pathname, arg->who, false, &whandler_stub) == 0);
+	assert(fs_open(fs, arg->pathname, arg->who, false) == -1);
+	assert(fs_write(fs, arg->pathname, inbuf, 135, arg->who, false, &whandler_stub, &sbhandler_stub) == 0);
+	assert(fs_read(fs, arg->pathname, &buf, &size, arg->who) == 0);
+	fs_close(fs, arg->pathname, arg->who);
 	free(buf);
 	return NULL;
 }
@@ -109,20 +112,22 @@ void* thirdTest(struct arg_s* arg){
 
 /** @brief Fourth testcase thread function */
 void* fourthTest(struct arg_s* arg){
-	assert(fs_create(&fs, arg->pathname, arg->who, false, &whandler_stub) == 0);
+	FileStorage_t* fs = ((struct arg_s*)arg)->fs;
+	assert(fs_create(fs, arg->pathname, arg->who, false, &whandler_stub) == 0);
 	printf("fs_create successfully completed by arg->who == %d\n", arg->who);
-	assert(fs_close(&fs, arg->pathname, arg->who) == 0);
+	assert(fs_close(fs, arg->pathname, arg->who) == 0);
 	printf("arg->who == %d exiting...\n\n", arg->who);
 	return NULL;
 }
 
 
-void* fifthTest(void* arg){
+void* fifthTest(struct arg_s* arg){
+	FileStorage_t* fs = ((struct arg_s*)arg)->fs;
 	llist_t* results;
 	llistnode_t* node;
 	fcontent_t* fc;
 	assert((results = llist_init()));
-	assert(fs_readN(&fs, 0, 0, &results) == 0);
+	assert(fs_readN(fs, 0, 0, &results) == 0);
 	printf("fifth_test: begin\n");
 	llist_foreach(results, node){
 		fc = (fcontent_t*)node->datum;
@@ -138,48 +143,50 @@ void* fifthTest(void* arg){
 }
 
 
-void* sixthTest_createwrite(void* arg){
-	char* filename = (char*)arg;
+void* sixthTest_createwrite(struct arg_s* arg){
+	FileStorage_t* fs = ((struct arg_s*)arg)->fs;
+	char* filename = (char*)(arg->pathname);
 	llist_t* newowner;
 	assert((newowner = llist_init()));
-	assert(fs_create(&fs, filename, 0, true, &whandler_stub) == 0); /* File is locked */
-	assert(fs_write(&fs, filename, STR2, 82, 0, true, &whandler_stub, &sbhandler_stub) == 0); /* Write content */
-	assert(fs_unlock(&fs, filename, 0, &newowner) == 0);
-	//assert(fs_remove(&fs, filename, 0, &whandler_stub) == -1);
+	assert(fs_create(fs, filename, 0, true, &whandler_stub) == 0); /* File is locked */
+	assert(fs_write(fs, filename, STR2, 82, 0, true, &whandler_stub, &sbhandler_stub) == 0); /* Write content */
+	assert(fs_unlock(fs, filename, 0, &newowner) == 0);
+	//assert(fs_remove(fs, filename, 0, &whandler_stub) == -1);
 	printf("newowner_size = %d\n", newowner->size);
 	if (newowner->size > 0) printf("newowner_clientId = %d\n", newowner->head->datum);
-	assert(fs_close(&fs, filename, 0) == 0);
-	assert(fs_clientCleanup(&fs, 0, &newowner) == 0);
+	assert(fs_close(fs, filename, 0) == 0);
+	assert(fs_clientCleanup(fs, 0, &newowner) == 0);
 	assert(llist_destroy(newowner, free) == 0);
 	printf("sixthTest - exiting\n");
 	return NULL;
 }
 
 
-void* sixthTest_locking(void* arg){
+void* sixthTest_locking(struct arg_s* arg){
 	int id = ((struct arg_s*)arg)->who;
 	char* filename = ((struct arg_s*)arg)->pathname;
+	FileStorage_t* fs = ((struct arg_s*)arg)->fs;
 	int* waitClients = ((struct arg_s*)arg)->waitClients;
 	llist_t* newowner;
 	assert((newowner = llist_init()));
 	int ret;
-	assert((ret = fs_open(&fs, filename, id, true)) >= 0);
+	assert((ret = fs_open(fs, filename, id, true)) >= 0);
 
 	pthread_mutex_lock(&mtx);
 	if (ret == 1) waitClients[id]++; /* Client waiting */
 	while (waitClients[id] > 0) { printf("%d waiting\n", id); pthread_cond_wait(&cond, &mtx); }
 	if (ret == 1){
-		ret = fs_open(&fs, filename, id, true);
+		ret = fs_open(fs, filename, id, true);
 		if (ret < 0) perror("fs_open[locking]");
 	}
 	pthread_mutex_unlock(&mtx);
 
-	assert(fs_write(&fs, filename, "@A@", 3, id, false, &whandler_stub, &sbhandler_stub) == 0);
-	assert(fs_close(&fs, filename, id) == 0);
+	assert(fs_write(fs, filename, "@A@", 3, id, false, &whandler_stub, &sbhandler_stub) == 0);
+	assert(fs_close(fs, filename, id) == 0);
 	llistnode_t* node;
 	int* datum;
 
-	assert(fs_clientCleanup(&fs, id, &newowner) == 0);
+	assert(fs_clientCleanup(fs, id, &newowner) == 0);
 	
 	pthread_mutex_lock(&mtx);
 	printf("newowners list size = %lu [client %d]\n", newowner->size, id);
@@ -206,10 +213,13 @@ int main(void){
 	struct arg_s args1_2;
 	struct arg_s args3[4];
 	struct arg_s args4[4];
+	struct arg_s args5;
+	struct arg_s args60;
 	struct arg_s args6[3];
 
 	args1_2.who = 1; args1_2.pathname = "/home/servator/Scrivania/file1";
-
+	args5.who = 0;
+	args60.who = 0;
 	for (int i = 0; i < 4; i++) args3[i].who = i;
 	args3[0].pathname = "/home/servator/Scrivania/file2";
 	args3[1].pathname = "/home/servator/Scrivania/file3";
@@ -224,13 +234,23 @@ int main(void){
 	
 	for (int i = 0; i < 3; i++){ args6[i].who = i+1; args6[i].pathname = LOREM_IPSUM; args6[i].waitClients = waitClients;}
 
-	assert(fs_init(&fs, 4, 512, 6, 24) == 0); /* 1/2 KB capacity, 6 maxFileNo and 25 possible clients (0-24) */
+	FileStorage_t* fs;
+	
+	assert((fs = fs_init(4, 512, 6, 24)) != NULL); /* 1/2 KB capacity, 6 maxFileNo and 25 possible clients (0-24) */
 
+	args1_2.fs = fs;
+	for (int i = 0; i < 3; i++){ args3[i].fs = fs; args4[i].fs = fs; args6[i].fs = fs; }
+	args3[3].fs = fs; args4[3].fs = fs;
+	
+	args5.fs = fs;
+	args60.pathname = LOREM_IPSUM;
+	args60.fs = fs;
+	
 	/* First test */
 	printf("\nFIRST TEST RESULT:\n");
 	pthread_create(&p[0], NULL, firstTest, &args1_2);
 	pthread_join(p[0], NULL);
-	fs_dumpAll(&fs);
+	fs_dumpAll(fs);
 
 	/* Second test */
 	printf("\nSECOND TEST RESULT:\n");
@@ -241,40 +261,40 @@ int main(void){
 	pthread_join(p[1], NULL);
 	llist_t* l = llist_init();
 	assert(l != NULL);
-	fs_clientCleanup(&fs, 1, &l);
+	fs_clientCleanup(fs, 1, &l);
 	printf("newowners_list size = %lu\n", l->size);
 	llist_destroy(l, free);
-	fs_dumpAll(&fs);
+	fs_dumpAll(fs);
 
 	/* Third test */
 	printf("\nTHIRD TEST RESULT:\n");
 	for (int i = 0; i < 4; i++) pthread_create(&p[i], NULL, thirdTest, &args3[i]);
 	for (int i = 0; i < 4; i++) pthread_join(p[i], NULL);	
-	fs_dumpAll(&fs);
-	assert(fs.fmap->nentries == 3); /* The last file inserted should have expelled the first two */
+	fs_dumpAll(fs);
+	assert(fs->fmap->nentries == 3); /* The last file inserted should have expelled the first two */
 	
 	/* Fourth test */
 	printf("\nFOURTH TEST RESULT:\n");
 	for (int i = 0; i < 4; i++) pthread_create(&p[i], NULL, fourthTest, &args4[i]);
 	for (int i = 0; i < 4; i++) pthread_join(p[i], NULL);	
-	assert(fs.fmap->nentries == 6); /* File capacity should have been reached and one file rejected */
-	fs_dumpAll(&fs);
+	assert(fs->fmap->nentries == 6); /* File capacity should have been reached and one file rejected */
+	fs_dumpAll(fs);
 
 	/* Fifth test */
 	printf("\nFIFTH TEST RESULT:\n");
-	pthread_create(&p[0], NULL, fifthTest, NULL);
+	pthread_create(&p[0], NULL, fifthTest, &args5);
 	pthread_join(p[0], NULL);
-	fs_dumpAll(&fs);
+	fs_dumpAll(fs);
 
 	/* Sixth test */
 	printf("\nSIXTH TEST RESULT:\n");
-	pthread_create(&p[0], NULL, sixthTest_createwrite, LOREM_IPSUM);
+	pthread_create(&p[0], NULL, sixthTest_createwrite, &args60);
 	pthread_join(p[0], NULL);
 	for (int i = 0; i < 3; i++) pthread_create(&p[i], NULL, sixthTest_locking, &args6[i]);
 	for (int i = 0; i < 3; i++) pthread_join(p[i], NULL);
-	fs_dumpAll(&fs);
+	fs_dumpAll(fs);
 
-	fs_destroy(&fs);
+	fs_destroy(fs);
 	
 	free(waitClients);
 	return 0;

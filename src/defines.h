@@ -21,7 +21,7 @@
 #define MBVALUE 1024 /* #KBs in 1 MB */
 #define KBVALUE 1024 /* Bytes in 1 KB */
 #define MAXPATHSIZE pathconf("/", _PC_PATH_MAX) /* Maximum length of pathname (not socket) */
-#define ATOMPIPEBUF(pfd) pathconf(pfd, _PC_PIPE_BUF) /* Maximum size of an atomic read/write on a pipe (pfd is one fd of a pipe) */
+#define ATOMPIPEBUF pathconf("/", _PC_PIPE_BUF) /* Maximum size of an atomic read/write on a pipe (pfd is one fd of a pipe) */
 #define UNIX_PATH_MAX 108 /* Maximum length of socket name */
 #define MAXBUFSIZE 4096 /* Maximum length of read/write buffers */
 #define CHSIZE sizeof(char) /* For using with integers to cast to size_t */
