@@ -24,6 +24,5 @@ int main(int argc, char* argv[]){
 	printf("AFTER having extracted data\n");
 	config_printout(&config);
 	free(config.socketPath);
-	free(config.logFilePath);
 	return 0;
 }

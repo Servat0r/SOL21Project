@@ -42,19 +42,20 @@ StorageKBSize = 0
 MaxFileNo = 100
 
 
-# Initial value of the 'maxclient' field for server and fdatas (i.e., initial length of
-# 'clients' field of any fdata_t object).
+# Initial value of the 'maxclient' field for server_t, FileStorage_t and FielData_t objects.
 MaxClientAtStart = 256
 
 
-# Minimum number of entries to add to 'clients' field of a fdata_t object when resizing.
-# Effective resize offset is MAX(len(clients) + offset, newclientfd).
+# Minimum factor to add to maxclient field of a server_t* and FileStorage_t*
+# objects when there is a connection with higher file descriptor.
+# Effective resize offset is MAX(maxclient + offset, newclientfd).
 ClientResizeOffset = 64
 
 
-# Length of the array of clients used by collector to cleanup old (closed) connections
-# file descriptors
-ClientCleanupBufSize = 16
-
 # Number of buckets of the file storage.
 FileStorageBuckets = 100
+
+
+# Length of backlog queue for server.
+# When 0, this field shall be set to SOMAXCONN.
+SockBacklog = 10

@@ -91,7 +91,7 @@ FileData_t* fdata_create(int maxclient, int creator, bool locking){ /* -> fs_cre
 	fdata->clients = calloc(maxclient + 1, sizeof(unsigned char)); /* Already zeroed */
 	if (!fdata->clients){
 		/* If queue CANNOT be destroyed, we CANNOT avoid (at least) a memory leak */
-		SYSCALL_NOTREC(tsqueue_destroy(fdata->waiting, dummy), -1, "fdata_create: while destroying waiting queue");
+		SYSCALL_NOTREC(tsqueue_destroy(fdata->waiting, dummy), NULL, "fdata_create: while destroying waiting queue");
 		free(fdata);
 		errno = ENOMEM;
 		return NULL;

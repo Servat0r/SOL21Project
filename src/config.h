@@ -22,9 +22,8 @@ typedef struct config_s {
 	int maxFileNo; /* default = 0 */
 	int maxClientAtStart; /* default = 0 */
 	int clientResizeOffset; /* default = 0 */
-	int clientCleanupBufSize; /* default = 0 */
-	char* logFilePath; /* MAXPATHSIZE == 4096, default = NULL */
 	int fileStorageBuckets; /* default = 0 */
+	int sockBacklog; /* default = 0 */
 
 } config_t;
 
@@ -42,7 +41,6 @@ bool isUnspecified(char* value){
 int config_init(config_t* config){
 	memset(config, 0, sizeof(*config));
 	config->socketPath = NULL;
-	config->logFilePath = NULL;
 	return 0;
 }
 
@@ -52,7 +50,6 @@ int config_init(config_t* config){
  */
 void config_reset(config_t* config){
 	config->socketPath = NULL;
-	config->logFilePath = NULL;
 }
 
 
@@ -118,21 +115,19 @@ int config_parsedict(config_t* config, icl_hash_t* dict){
 	char* name;
 	void* datum;
 	icl_hash_foreach(dict, tmpint, tmpentry, name, datum){
-		STR_SETATTR(name, "SocketPath", datum, config->socketPath)
-		STR_SETATTR(name, "LogFilePath", datum, config->logFilePath)
-		NUM_SETATTR(name, "WorkersInPool", datum, config->workersInPool)
-		STORAGE_SETATTR(name, "StorageGBSize", datum, config->storageSize, GBVALUE)
-		STORAGE_SETATTR(name, "StorageMBSize", datum, config->storageSize, MBVALUE)
-		STORAGE_SETATTR(name, "StorageKBSize", datum, config->storageSize, 1)
-		NUM_SETATTR(name, "MaxFileNo", datum, config->maxFileNo)
-		NUM_SETATTR(name, "MaxClientAtStart", datum, config->maxClientAtStart)
-		NUM_SETATTR(name, "ClientResizeOffset", datum, config->clientResizeOffset)
-		NUM_SETATTR(name, "ClientCleanupBufSize", datum, config->clientCleanupBufSize)
-		NUM_SETATTR(name, "FileStorageBuckets", datum, config->fileStorageBuckets)
+		STR_SETATTR(name, "SocketPath", datum, config->socketPath);
+		NUM_SETATTR(name, "WorkersInPool", datum, config->workersInPool);
+		STORAGE_SETATTR(name, "StorageGBSize", datum, config->storageSize, GBVALUE);
+		STORAGE_SETATTR(name, "StorageMBSize", datum, config->storageSize, MBVALUE);
+		STORAGE_SETATTR(name, "StorageKBSize", datum, config->storageSize, 1);
+		NUM_SETATTR(name, "MaxFileNo", datum, config->maxFileNo);
+		NUM_SETATTR(name, "MaxClientAtStart", datum, config->maxClientAtStart);
+		NUM_SETATTR(name, "ClientResizeOffset", datum, config->clientResizeOffset);
+		NUM_SETATTR(name, "FileStorageBuckets", datum, config->fileStorageBuckets);
+		NUM_SETATTR(name, "SockBacklog", datum, config->sockBacklog);
 	}
 	/* Extract string values from the hashtable before destroying it*/
-	if (config->socketPath) { SYSCALL_EXIT(icl_hash_delete(dict, "SocketPath", free, dummy), "config_parsedict: while extracting socket path"); }
-	if (config->logFilePath) { SYSCALL_EXIT(icl_hash_delete(dict, "LogFilePath", free, dummy), "config_parsedict: while extracting logfile path"); }
+	if (config->socketPath) { SYSCALL_NOTREC(icl_hash_delete(dict, "SocketPath", free, dummy), -1, "config_parsedict: while extracting socket path"); }
 	
 	return 0;
 }
@@ -146,11 +141,9 @@ void config_printout(config_t* config){
 	printf("WorkersInPool = %d\n", config->workersInPool);
 	printf("StorageSize (KB) = %ld\n", config->storageSize);
 	printf("MaxFileNo = %d\n", config->maxFileNo);	
-	if (config->logFilePath) printf("LogFilePath = %s\n", config->logFilePath);
-	else printf("Unspecified LogFilePath\n");
 	printf("MaxClientAtStart = %d\n", config->maxClientAtStart);
 	printf("ClientResizeOffset = %d\n", config->clientResizeOffset);
-	printf("ClientCleanupBufSize = %d\n", config->clientCleanupBufSize);
+	printf("SockBacklog = %d\n", config->sockBacklog);
 	printf("FileStorageBuckets = %d\n", config->fileStorageBuckets);
 	printf("No more attributes\n");
 }

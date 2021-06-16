@@ -91,7 +91,7 @@ typedef struct server_s {
 	//fd_set hangupSet; /* Hanged up on lock file descriptors */
 	int sockBacklog; /* Defaults to SOMAXCONN */ //TODO Aggiungere a config.txt
 	
-	sigset_t sigmask; /* Signal mask for pselect */
+	sigset_t psmask; /* Signal mask for pselect */
 	
 } server_t;
 
@@ -99,7 +99,7 @@ typedef struct server_s {
 /** Struct describing arguments to pass to workers */
 typedef struct wArgs_s {
 	server_t server;
-	int workerId; /* Identifier (1 - #workers) */
+	int workerId; /* Identifier [1, #workers] */
 } wArgs_t; //TODO Aggiungere altri campi se necessario
 
 
@@ -108,9 +108,9 @@ typedef struct wArgs_s {
  * @brief Initializes server fields with configuration parameters.
  * @param config -- Pointer to config_t object with all configuration
  * parameters.
- * @return 0 on success, -1 on error. 
+ * @return server_t object pointer on success, NULL on error.
  */
-int server_init(server_t* server, config_t* config);
+server_t* server_init(config_t* config);
 
 
 /**
@@ -171,7 +171,7 @@ int server_sbHandler(void* content, size_t size, int cfd, bool modified);
 
 int main(int argc, char* argv){
 	config_t config;
-	server_t server;
+	server_t* server;
 	wArgs_t* wArgsArray; /* Array of worker arguments */ //TODO Calloc'd when #workers is known
 	sigset_t sigmask; /* Sigmask for correct signal handling "dispatching" */
 	/* TODO:
