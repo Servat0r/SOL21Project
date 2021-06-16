@@ -93,7 +93,7 @@ int
 	
 	/* Non-modifying operations that COULD call modifying ones */
 	fs_write(FileStorage_t* fs, char* pathname, void* buf, size_t size, int client, bool wr,
-		int (*waitHandler)(tsqueue_t* waitQueue), int (*sendBackHandler)(void* content, size_t size, int cfd, bool modified)),
+		int (*waitHandler)(tsqueue_t* waitQueue), int (*sendBackHandler)(char* pathname, void* content, size_t size, int cfd, bool modified)),
 	
 	/**
 	 * @brief Registrazione di cosa ogni thread vuole fare:

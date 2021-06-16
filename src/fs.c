@@ -122,7 +122,8 @@ static int fs_trash(FileStorage_t* fs, FileData_t* fdata, char* filename){
  *	- EINVAL: invalid arguments;
  *	- any error by llist_pop.
  */
-static int fs_replace(FileStorage_t* fs, int client, int mode, size_t size, int (*waitHandler)(tsqueue_t* waitQueue), int (*sendBackHandler)(void* content, size_t size, int cfd, bool modified)){
+static int fs_replace(FileStorage_t* fs, int client, int mode, size_t size, int (*waitHandler)(tsqueue_t* waitQueue), 
+	int (*sendBackHandler)(char* pathname, void* content, size_t size, int cfd, bool modified)){
 	if (!waitHandler || (mode != R_CREATE && mode != R_WRITE)){ errno = EINVAL; return -1; }
 	int ret = 0;
 	char* next;
@@ -144,7 +145,7 @@ static int fs_replace(FileStorage_t* fs, int client, int mode, size_t size, int 
 		if (sendBackHandler){ /* Passed an handler to send back file content (NULL for fs_create!) */
 			void* file_content = file->data;
 			size_t file_size = file->size;
-			sendBackHandler(file_content, file_size, client, (file->flags & O_DIRTY ? true : false)); /* Errors are ignored (file content and size are untouched) */ //FIXME Sure??
+			sendBackHandler(next, file_content, file_size, client, (file->flags & O_DIRTY ? true : false)); /* Errors are ignored (file content and size are untouched) */ //FIXME Sure??
 		}
 		SYSCALL_NOTREC(fs_trash(fs, file, next), -1, NULL); /* Updates automatically spaceSize */
 		free(next); /* Frees key extracted from replQueue */
@@ -564,7 +565,7 @@ int	fs_readN(FileStorage_t* fs, int client, int N, llist_t** results){
  *	- any error by fs_search and fdata_write.
  */
 int	fs_write(FileStorage_t* fs, char* pathname, void* buf, size_t size, int client, bool wr,
-	int (*waitHandler)(tsqueue_t* waitQueue), int (*sendBackHandler)(void* content, size_t size, int cfd, bool modified)){
+	int (*waitHandler)(tsqueue_t* waitQueue), int (*sendBackHandler)(char* pathname, void* content, size_t size, int cfd, bool modified)){
 	
 	if (!pathname || !buf || (size < 0) || (client < 0) || !waitHandler){ errno = EINVAL; return -1; }
 	bool bwrite;

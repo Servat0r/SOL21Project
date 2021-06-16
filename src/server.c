@@ -103,7 +103,10 @@ typedef struct wArgs_s {
 } wArgs_t; //TODO Aggiungere altri campi se necessario
 
 
-//TODO Malloc'd server?
+/* File descriptor "switching" function */
+static int fd_switch(int fd){ return -fd-1; }
+
+
 /**
  * @brief Initializes server fields with configuration parameters.
  * @param config -- Pointer to config_t object with all configuration
@@ -156,7 +159,23 @@ int server_destroy(server_t* server);
  * @return 0 on success, -1 on error.
  * @note On error, waitQueue is unmodified.
  */
-int server_wHandler(tsqueue_t* waitQueue);
+int server_wHandler(tsqueue_t* waitQueue){
+	if (!waitQueue) return -1;
+	int res1 = 0;
+	int* cfd;
+	int error = ENOENT; /* Error message to send back to clients */
+	message_t* msg;
+	SYSCALL_NOTREC(tsqueue_iter_init(waitQueue), -1, "server_wHandler: while starting iteration");
+	while (true){
+		SYSCALL_NOTREC( (res1 = tsqueue_iter_next(waitQueue, &cfd)), -1, "server_wHandler: while iterating");
+		if (res1 != 0) break; /* Iteration ended */
+		if (!cfd) continue; /* NULL pointer in queue */
+		SYSCALL_NOTREC( msend(*cfd, &msg, M_ERR, "server_wHandler: while creating message to send", "server_wHandler: while sending message",
+			sizeof(error), &error), -1, "server_wHandler: while sending back failure message");
+	}
+	SYSCALL_NOTREC(tsqueue_iter_end(waitQueue), -1, "server_wHandler: while ending iteration");
+	return 0;
+}
 
 
 /**
@@ -164,9 +183,15 @@ int server_wHandler(tsqueue_t* waitQueue);
  * for sending back expelled files to calling client
  * when writing on file storage.
  * @return 0 on success, -1 on error.
- * @note On error, content is untouched. //FIXME Sicuro che debba essere così??
+ * @note On error, content is untouched.
  */
-int server_sbHandler(void* content, size_t size, int cfd, bool modified);
+int server_sbHandler(char* pathname, void* content, size_t size, int cfd, bool modified){
+	if (!pathname || !content || (cfd < 0)) return -1;
+	message_t* msg;
+	SYSCALL_NOTREC( msend(cfd, &msg, M_GETF, "server_sbHandler: while creating message to send", "server_sbHandler: while sending message",
+		strlen(pathname)+1, pathname, size, content, sizeof(bool), &modified), -1, "server_sbHandler: while sending back file");
+	return 0;
+}
 
 
 int main(int argc, char* argv){
@@ -174,6 +199,7 @@ int main(int argc, char* argv){
 	server_t* server;
 	wArgs_t* wArgsArray; /* Array of worker arguments */ //TODO Calloc'd when #workers is known
 	sigset_t sigmask; /* Sigmask for correct signal handling "dispatching" */
+	
 	/* TODO:
 	0. Install signal handlers
 	1. Initialize config struct.
