@@ -28,10 +28,16 @@
 #define DFL_CONFIG "config.txt"
 #define DFL_MAXCLIENT 1023
 #define DFL_CLRESIZE 64
-
-
 /* #{buckets} for the dictionary for parsing config file */
 #define PARSEDICT_BUCKETS 5
+
+/**
+ * All the following are utilities macro for server handling,
+ * in particular:
+ *	- server statistics dumping;
+ *	- listen socket and pipe handling;
+ *	- adding/removing client connections.
+ */
 
 /* Dumps variable of primitive type (char*, int, long, size_t) to the screen */
 #define DUMPVAR(stream, func, value, type)\
@@ -46,16 +52,102 @@ do {\
 } while(0);
 
 
-#if 0
-//FIXME WARNING: Questa macro NON distrugge anche le strutture dati interne del server!
-#define FREE_SERVER_RETURN(sc, server, ret, errmsg)
-do {
-	if ((sc) == -1){
-		perror(errmsg);
-		free(server);
-	}
+/* Closes listen socket and pipe (if open) */
+#define CLOSE_CHANNELS(server)\
+do {\
+	if (server->pfd[0] >= 0) close(server->pfd[0]);\
+	if (server->pfd[1] >= 0) close(server->pfd[1]);\
+	if (server->sockfd >= 0) close(server->sockfd);\
 } while(0);
-#endif
+
+
+/* Extends the macro above for using in a syscall-like function */
+#define CLS_CHAN_RETURN(server, sc, message)\
+do {\
+	if ((sc) == -1){\
+		perror(message);\
+		CLOSE_CHANNELS(server);\
+		return -1;\
+	}\
+} while(0);
+
+
+/* Utility macro for destroying worker-arguments array */
+#define DESTROY_WARGS(wArgsArray, n)\
+do {\
+	if (!wArgsArray) break;\
+	for (int i = 0; i < n; i++) free(wArgsArray[i]);\
+	free(wArgsArray);\
+} while(0);
+
+
+/* Updates max listened file descriptor */
+#define UPDATE_MAXLISTEN(server)\
+do {\
+	int m = server->maxlisten;\
+	while (!FD_ISSET(m, &server->saveset)) m--;\
+	server->maxlisten = m;\
+} while(0);
+
+
+/**
+ * Sets a new open (and listened) client connection [manager] 
+ * @note In this case (instead of below) we MUST control that
+ * cfd is neither any endpoint of the pipe nor the listen socket.
+ */
+#define OPEN_CLCONN(server, cfd)\
+do {\
+	if (FD_ISSET(server->clientset)) break;\
+	if (cfd == server->pfd[0]) break;\
+	if (cfd == server->pfd[1]) break;\
+	if (cfd == server->sockfd) break;\
+	FD_SET(cfd, &server->clientset);\
+	FD_SET(cfd, &server->rdset);\
+	FD_SET(cfd, &server->saveset);\
+	server->nactives++;\
+	server->maxlisten = MAX(server->maxlisten, cfd);\
+} while(0);
+
+
+/* Closes a client connection [manager] */
+//TODO Pipe e listensocket NON vengono MAI chiusi (NON sono in clientset!)
+#define CLOSE_CLCONN(server, cfd)\
+do {\
+	if (!FD_ISSET(server->clientset)) break;\
+	close(cfd);\
+	FD_CLR(cfd, &server->clientset);\
+	FD_CLR(cfd, &server->rdset);\
+	FD_CLR(cfd, &server->saveset);\
+	server->nactives--;\
+	UPDATE_MAXLISTEN(server);\
+} while(0);
+
+
+/* Closes ALL client connections [manager] */
+#define CLOSE_ALL_CFDS(server)\
+do {\
+	int i = 0;\
+	int cfd = 0;\
+	while (i < server->nactives){\
+		if (FD_ISSET(cfd, &server->clientset)){\
+			close(cfd);\
+			FD_CLR(cfd, &server->clientset);\
+			FD_CLR(cfd, &server->rdset);\
+			FD_CLR(cfd, &server->saveset);\
+			i++;\
+		}\
+	}\
+	server->nactives = 0;\
+} while(0);
+
+
+/* Removes a client fd from listen sets */
+#define UNLISTEN(server, cfd)\
+do {\
+	FD_CLR(cfd, &server->rdset);\
+	FD_CLR(cfd, &server->saveset);\
+	UPDATE_MAXLISTEN(server);\
+} while(0);
 
 
 /* Options accepted by server */
@@ -66,6 +158,7 @@ const optdef_t options[] = {
 
 /* Length of options array */
 const int optlen = 1;
+
 
 /**
  * State of the server:
@@ -96,7 +189,6 @@ void term_sighandler(int sig){
 	}
 }
 
-
 /**
  * @brief Struct describing server.
  */
@@ -105,36 +197,34 @@ typedef struct server_s {
 	struct sockaddr_un sa; /* Server address (socketPath and length of path) */
 	wpool_t* wpool; /* Workers pool (contains #workers )*/
 	int pfd[2]; /* Pipe for receiving back fds */
-	/* 
-	* Array in which to store read fds from pipe
-	*/
-	int readback[_POSIX_PIPE_BUF];
+	int readback[_POSIX_PIPE_BUF]; /* Array in which to store read fds from pipe */
 	tsqueue_t* connQueue; /* Concurrent queue for handling client requests dispatching */
 	FileStorage_t* fs; /* File storage (will contain storage size in bytes and fileStorageBuckets) */
 	int sockfd; /* Listen socket file descriptor */
+	int sockBacklog; /* Defaults to SOMAXCONN */
 
-	int nactives; /* Number of active clients */
-	int maxclient; /* Maximum active client (initially maxClientAtStart as config param) */
+	/* Internal state for client resizing */
+	int maxclient; /* Maximum active client fd (initially maxClientAtStart as config param) */
 	int clientResizeOffset; /* Minimum #{client entries} to add when a new connfd is higher than current maximum */
-
+	
+	/* Internal state for all active client connections */
+	int nactives; /* Number of active clients */
+	fd_set clientset; /* Active client connections */
+	
+	/* Internal state for ONLY listening client connections */
 	int maxlisten; /* Maximum listened file descriptor */
-	int maxhup; /* Maximum hanged-up file descriptor */
 	fd_set rdset; /* File descriptors monitored for listening */
 	fd_set saveset; /* Backup fd_set for reinitialization */
-	fd_set hupset; /* Hanged up on lock file descriptors */
-	int sockBacklog; /* Defaults to SOMAXCONN */
-	
+	/* pselect utilities */	
 	sigset_t psmask; /* Signal mask for pselect */
 	
 } server_t;
-
 
 /** Struct describing arguments to pass to workers */
 typedef struct wArgs_s {
 	server_t* server;
 	int workerId; /* Identifier [1, #workers] */
 } wArgs_t; //TODO Aggiungere altri campi se necessario
-
 
 /* File descriptor "switching" function */
 static int fd_switch(int fd){ return -fd-1; }
@@ -155,20 +245,19 @@ server_t* server_init(config_t* config){
 	/* Zeroes reading sets */
 	FD_ZERO(&server->rdset);
 	FD_ZERO(&server->saveset);
-	FD_ZERO(&server->hupset);
-	sigfillset(&server->psmask);
+	FD_ZERO(&server->clientset);
 	
 	/* Sets sigmask for pselect */
+	sigfillset(&server->psmask);
 	sigdelset(&server->psmask, SIGINT);
 	sigdelset(&server->psmask, SIGQUIT);
 	sigdelset(&server->psmask, SIGHUP);
 	
 	/* Initializes numerical fields */
-	memset(server->pfd, 0, sizeof(server->pfd));
+	memset(server->pfd, -1, sizeof(server->pfd));
 	server->sockfd = -1; /* No opened socket */
 	server->nactives = 0; /* No active connection */
 	server->maxlisten = -1; /* No listening */
-	server->maxhup = -1; /* No hanged-up */
 
 	/* Configures socket path */
 	memset(&server->sa, 0, sizeof(server->sa));
@@ -213,6 +302,28 @@ server_t* server_init(config_t* config){
 
 
 /**
+ * @brief Manager function.
+ * @return NULL.
+ */
+//TODO Stub
+void* server_manager(server_t* server){
+	printf("Thread manager 0\n"); //TODO L'identificatore del thread manager è 0
+	return NULL;
+}
+
+
+/**
+ * @brief Worker function.
+ * @return NULL.
+ */
+//TODO Stub
+void* server_worker(wArgs_t* wArgs){
+	printf("Thread worker %d\n", wArgs->workerId);
+	return NULL;
+}
+
+
+/**
  * @brief Starts server with the specified parameters as
  * set by server_init, i.e.:
  *	- opens socket for listening, binds address and makes
@@ -225,29 +336,23 @@ server_t* server_init(config_t* config){
  * num, otherwise the program shall fail.
  * @return 0 on success, -1 on error.
  */
-int server_start(server_t* server, wArgs_t* wArgs){
+int server_start(server_t* server, wArgs_t** wArgs){
+	if (!server || !wArgs) return -1;
+	CLS_CHAN_RETURN( server, pipe(server->pfd), "server_start: pipe");
+	CLS_CHAN_RETURN( server, (server->sockfd = socket(AF_UNIX, SOCK_STREAM, 0)), "server_start: socket");
+	CLS_CHAN_RETURN( server, bind(server->sockfd, (const struct sockaddr*)(&server->sa), UNIX_PATH_MAX), "server_start: bind");
+	CLS_CHAN_RETURN( server, listen(server->sockfd, server->sockBacklog), "server_start: listen");
+	CLS_CHAN_RETURN( server, wpool_runAll(server->wpool, &server_worker, (void**)wArgs), "server_start: wpool_runAll");
+	server->maxlisten = MAX(server->sockfd, server->pfd[0]); /* We are now listening these two */
 	return 0;
 }
 
 
 /**
- * @brief Manager function.
- * @return NULL.
+ * @brief Dumps all relevant information of
+ * server and its data structures to file
+ * pointed by stream.
  */
-void* server_manager(server_t* server){
-	return 0;
-}
-
-
-/**
- * @brief Worker function.
- * @return NULL.
- */
-void* server_worker(wArgs_t* wArgs){
-	return 0;
-}
-
-
 void server_dump(server_t* server, FILE* stream){
 	if (!server) return;
 	if (!stream) stream = stdout; /* Default */
@@ -261,7 +366,6 @@ void server_dump(server_t* server, FILE* stream){
 	DUMPVAR(stream, server_dump, server->clientResizeOffset, int);
 	DUMPVAR(stream, server_dump, server->maxlisten, int);
 	DUMPVAR(stream, server_dump, server->sockBacklog, int);
-	DUMPVAR(stream, server_dump, server->maxhup, int);
 	fs_dumpAll(server->fs);
 	fprintf(stream, "server_dump: end\n");
 }
@@ -272,6 +376,11 @@ void server_dump(server_t* server, FILE* stream){
  * statistics stdout dumping at end of mainloop.
  */
 int server_end(server_t* server){ 
+	SYSCALL_RETURN(wpool_joinAll(server->wpool), -1, "server_end: wpool_joinAll");
+	CLOSE_CHANNELS(server); /* Closes pipe and listen socket */
+	CLOSE_ALL_CFDS(server); /* Closed ALL (still active) client fds */
+	server->maxlisten = -1; /* No listening connection */
+	server_dump(server, stdout);
 	return 0;
 }
 
@@ -343,7 +452,7 @@ int server_sbHandler(char* pathname, void* content, size_t size, int cfd, bool m
 int main(int argc, char* argv[]){
 	config_t config;
 	server_t* server;
-	wArgs_t* wArgsArray; /* Array of worker arguments */
+	wArgs_t** wArgsArray; /* Array of worker arguments */
 	struct sigaction sa_term, sa_ign; /* For registering signal handlers */
 	sigset_t sigmask; /* Sigmask for correct signal handling "dispatching" */
 	llist_t* optvals; /* For parsing cmdline options */
@@ -372,8 +481,6 @@ int main(int argc, char* argv[]){
 	sa_ign.sa_handler = SIG_IGN;
 	SYSCALL_EXIT(sigaction(SIGPIPE, &sa_ign, NULL), "sigaction[SIGPIPE]");
 	
-	//TODO Spostare! wpool_runAll(&server->wpool, mtserver_work, (void*)server);
-
 	config_init(&config);
 	
 	/* Cmdline arguments parsing: if '-c' is NOT found, use default location for config.txt */
@@ -431,21 +538,33 @@ int main(int argc, char* argv[]){
 	}
 	
 	/* Initializing arguments for workers */
-	wArgsArray = calloc(server->wpool->nworkers, sizeof(wArgs_t));
+	wArgsArray = calloc(server->wpool->nworkers, sizeof(wArgs_t*));
 	if (!wArgsArray){ SYSCALL_EXIT(server_destroy(server), "server_destroy"); }
-	for (int i = 0; i < server->wpool->nworkers; i++) { wArgsArray[i].server = server; wArgsArray[i].workerId = i; };
+	for (int i = 0; i < server->wpool->nworkers; i++){
+		wArgsArray[i] = malloc(sizeof(wArgs_t));
+		if (!wArgsArray[i]){
+			DESTROY_WARGS(wArgsArray, i);
+			wArgsArray = NULL; /* server_start will fail */
+			break;	
+		}
+		memset(wArgsArray[i], 0, sizeof(wArgs_t));
+		wArgsArray[i]->server = server;
+		wArgsArray[i]->workerId = i+1; /* Gli identificatori dei workers vanno da 1 a #workers */
+	}
 	
+	/* Starting server and spawning workers */
 	if (server_start(server, wArgsArray) == -1){
-		free(wArgsArray);
+		DESTROY_WARGS(wArgsArray, server->wpool->nworkers); /* If NULL, no operation is performed */
 		SYSCALL_EXIT(server_destroy(server), "server_destroy");
 		exit(EXIT_FAILURE);
 	}
 	
-	SYSCALL_EXIT(server_manager(server), "server_manager");
-	SYSCALL_EXIT(server_end(server), "server_end");
+	/* Mainloop and final joining/cleaning */
+	server_manager(server);
+	server_end(server);
 	
-	free(wArgsArray);
-	server_dump(server, NULL);
+	DESTROY_WARGS(wArgsArray, server->wpool->nworkers);
+	//server_dump(server, NULL);
 	SYSCALL_EXIT(server_destroy(server), "server_destroy");
 	return 0;
 }

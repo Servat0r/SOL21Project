@@ -692,7 +692,6 @@ int fs_remove(FileStorage_t* fs, char* pathname, int client, int (*waitHandler)(
 		/* "Phantom" file */
 		NOTREC_UNLOCK(fs, fs_trash(fs, file, pathname), "fs_remove: while destroying file"); /* Updates spaceSize automatically */
 		char* pathcopy;
-		size_t n = strlen(pathname);
 		int res1, res2;
 		/* Removes filename from the replacement queue: failure here means possible aliasing with future files */
 		NOTREC_UNLOCK(fs, tsqueue_iter_init(fs->replQueue), "fs_remove: while initializing iteration on replacement queue\n");
@@ -749,16 +748,32 @@ int	fs_clientCleanup(FileStorage_t* fs, int client, llist_t** newowners_list){
  * Possible errors are:
  *	- EINVAL: invalid arguments;
  *	- any error by pthread_mutex_destroy, llist_destroy and icl_hash_destroy.
+ * @note This function sets to NULL and frees ALL files, and so it MUST be
+ * executed when there is no other thread accessing filesystem.
  */
 int	fs_destroy(FileStorage_t* fs){
 	if (!fs){ errno = EINVAL; return -1; }
-
-	/* Unavoidable memory leak */
-	SYSCALL_NOTREC(icl_hash_destroy(fs->fmap, free, fdata_destroy), -1, "fs_destroy: while destroying file-hashtable");
-	MTX_DESTROY(&fs->gblock);
 	
+	fs_wop_init(fs);
+	int tmpint;
+	icl_entry_t* tmpent;
+	char* filename;
+	FileData_t* file;
+	icl_hash_foreach(fs->fmap, tmpint, tmpent, filename, file){
+		tmpent->data = NULL;
+		/* Unavoidable memory leak */
+		SYSCALL_NOTREC(fdata_destroy(file), -1, "fs_destroy: while destroying files");
+	}
+	/* No operation is performed on NULL pointers by free */
+	SYSCALL_NOTREC(icl_hash_destroy(fs->fmap, free, free), -1, "fs_destroy: while destroying file-hashtable");
 	/* Unavoidable memory leak */
 	SYSCALL_NOTREC(tsqueue_destroy(fs->replQueue, free), -1, "fs_destroy: while destroying replacement queue");
+	fs_op_end(fs);
+	
+	MTX_DESTROY(&fs->gblock);
+	CD_DESTROY(&fs->conds[0]);
+	CD_DESTROY(&fs->conds[1]);
+	
 	memset(fs, 0, sizeof(FileStorage_t));
 	free(fs); //FIXME Sure memset + free?
 	return 0;

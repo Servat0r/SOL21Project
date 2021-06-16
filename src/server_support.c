@@ -42,7 +42,7 @@ wpool_t* wpool_init(int nworkers){
  */
 int	wpool_run(wpool_t* wpool, int index, void*(*threadFun)(void*), void* args){
 	if (!wpool || (index < 0) || (index >= wpool->nworkers)){ errno = EINVAL; return -1; }
-	pthread_create(&wpool->workers[index], NULL, threadFun, args);
+	SYSCALL_NOTREC(pthread_create(&wpool->workers[index], NULL, threadFun, args), -1, "wpool_run: pthread_create");
 	return 0;
 }
 
@@ -58,7 +58,7 @@ int	wpool_run(wpool_t* wpool, int index, void*(*threadFun)(void*), void* args){
  */
 int	wpool_runAll(wpool_t* wpool, void*(*threadFun)(void*), void** args){
 	if (!wpool || !args){ errno = EINVAL; return -1; }
-	for (int i = 0; i < wpool->nworkers; i++) pthread_create(&wpool->workers[i], NULL, threadFun, args[i]);
+	for (int i = 0; i < wpool->nworkers; i++) SYSCALL_NOTREC(pthread_create(&wpool->workers[i], NULL, threadFun, args[i]), -1, "wpool_runAll: pthread_create");
 	return 0;
 }
 
