@@ -19,6 +19,8 @@
 #include <signal.h>
 #include <limits.h>
 
+//#define _SERVER_DEBUG_MODE_
+
 /* Flags for server state (see below) */
 #define S_OPEN 0
 #define S_CLOSED 1
@@ -30,6 +32,12 @@
 #define DFL_CLRESIZE 64
 /* #{buckets} for the dictionary for parsing config file */
 #define PARSEDICT_BUCKETS 5
+/**
+ * Maximum #bytes readable into server->readback to be sure
+ * of avoiding partial and non-atomic reads independently
+ * of sizeof(int), _POSIX_PIPE_BUF and the running platform.
+*/
+#define INTPIPEBUF sizeof(int) * (_POSIX_PIPE_BUF/sizeof(int))
 
 /**
  * All the following are utilities macro for server handling,
@@ -58,6 +66,9 @@ do {\
 	if (server->pfd[0] >= 0) close(server->pfd[0]);\
 	if (server->pfd[1] >= 0) close(server->pfd[1]);\
 	if (server->sockfd >= 0) close(server->sockfd);\
+	server->pfd[0] = -1;\
+	server->pfd[1] = -1;\
+	server->sockfd = -1;\
 } while(0);
 
 
@@ -90,6 +101,18 @@ do {\
 } while(0);
 
 
+/* Closes listen socket ONLY */
+#define CLOSE_LSOCKET(server)\
+do {\
+	if (server->sockfd >= 0){\
+		close(server->sockfd);\
+		FD_CLR(server->sockfd, &server->saveset);\
+		FD_CLR(server->sockfd, &server->rdset);\
+		server->sockfd = -1;\
+	}\
+} while(0);
+
+
 /**
  * Sets a new open (and listened) client connection [manager] 
  * @note In this case (instead of below) we MUST control that
@@ -97,7 +120,7 @@ do {\
  */
 #define OPEN_CLCONN(server, cfd)\
 do {\
-	if (FD_ISSET(server->clientset)) break;\
+	if (FD_ISSET(cfd, &server->clientset)) break;\
 	if (cfd == server->pfd[0]) break;\
 	if (cfd == server->pfd[1]) break;\
 	if (cfd == server->sockfd) break;\
@@ -110,10 +133,9 @@ do {\
 
 
 /* Closes a client connection [manager] */
-//TODO Pipe e listensocket NON vengono MAI chiusi (NON sono in clientset!)
 #define CLOSE_CLCONN(server, cfd)\
 do {\
-	if (!FD_ISSET(server->clientset)) break;\
+	if (!FD_ISSET(cfd, &server->clientset)) break;\
 	close(cfd);\
 	FD_CLR(cfd, &server->clientset);\
 	FD_CLR(cfd, &server->rdset);\
@@ -140,15 +162,23 @@ do {\
 	server->nactives = 0;\
 } while(0);
 
-
 /* Removes a client fd from listen sets */
 #define UNLISTEN(server, cfd)\
 do {\
+	if (!FD_ISSET(cfd, &server->clientset)) break;\
 	FD_CLR(cfd, &server->rdset);\
 	FD_CLR(cfd, &server->saveset);\
 	UPDATE_MAXLISTEN(server);\
 } while(0);
 
+/* "Re-adds" client to listen sets */
+#define RELISTEN(server, cfd)\
+do {\
+	if (!FD_ISSET(cfd, &server->clientset)) break;\
+	FD_SET(cfd, &server->rdset);\
+	FD_SET(cfd, &server->saveset);\
+	server->maxlisten = MAX(server->maxlisten, cfd);\
+} while(0);
 
 /* Options accepted by server */
 const optdef_t options[] = {
@@ -184,7 +214,7 @@ void cleanup(void){
 /* Signal handler for server termination */
 void term_sighandler(int sig){
 	if (serverState == 0){
-		if (sig == SIGHUP) serverState = S_CLOSED; //TODO Usare SIGTSTP per testing "a mano" (non bash)
+		if ((sig == SIGHUP) || (sig == SIGTSTP)) serverState = S_CLOSED;
 		else if ((sig == SIGINT) || (sig == SIGQUIT)) serverState = S_SHUTDOWN;
 	}
 }
@@ -303,12 +333,82 @@ server_t* server_init(config_t* config){
 
 /**
  * @brief Manager function.
- * @return NULL.
+ * @return 0 on success, -1 on error.
  */
-//TODO Stub
-void* server_manager(server_t* server){
+int server_manager(server_t* server){
+	int pres = 0;
+	int* nfd = NULL;
+	int cfd = 0;
+	int dispatched = 0;
 	printf("Thread manager 0\n"); //TODO L'identificatore del thread manager è 0
-	return NULL;
+	while (true){
+		
+		/* Mainloop 0 - Handle S_CLOSED server termination and reset readback array */
+		if ((serverState == S_CLOSED) && (server->nactives == 0)) break; /* Closing and no more client connections active */
+		memset(server->readback, 0, sizeof(server->readback));
+
+		/* Mainloop 1 - Handle pselect */
+		server->rdset = server->saveset;
+		/* SIGNAL UMASKING IN PSELECT */
+		pres = pselect(server->maxlisten + 1, &server->rdset, NULL, NULL, NULL, &server->psmask);
+		/* ALL SIGNALS ARE MASKED NOW */
+		if (pres == -1){
+			if (errno == EINTR){ /* Signal caught or other interrupt */
+				if (serverState != S_OPEN){
+					printf("Termination signal caught\n");
+					CLOSE_LSOCKET(server); //TODO Scrivere!
+				} /* No more connections (data in server->rdset are NOT valid!) */
+				if (serverState == S_CLOSED) continue;
+				if (serverState == S_SHUTDOWN){
+					FD_ZERO(&server->rdset);
+					FD_ZERO(&server->saveset);
+					server->maxlisten = -1;
+					break;
+				}
+			} else return -1;
+		} else if (pres == 0){ printf("Timeout expired\n"); continue; }/* Timeout expired with no ready fds */
+		/* Mainloop - 2 : Handle current listened clients */
+		dispatched = 0;
+		cfd = 0;
+		while (dispatched < pres){
+			if (FD_ISSET(cfd, &server->rdset)){ /* Ready fd */
+				dispatched++;
+				if ((cfd == server->sockfd) || (cfd == server->pfd[0]) || (cfd == server->pfd[1])) continue; /* Handle them after */
+				nfd = malloc(sizeof(int));
+				if (!nfd) exit(EXIT_FAILURE); /* Unrecoverable error */
+				*nfd = cfd;
+				UNLISTEN(server, cfd); /* No problem with maxlisten updates */
+				SYSCALL_EXIT(tsqueue_push(server->connQueue, nfd), "server_manager: tsqueue_push");
+				nfd = NULL;
+			}
+			cfd++;
+		}
+		/* Mainloop - 3 : Accept new connections */
+		if (server->sockfd >= 0){ /* Open */
+			if ( FD_ISSET(server->sockfd, &server->rdset) ){
+				int newcfd;
+				SYSCALL_EXIT((newcfd = accept(server->sockfd, NULL, 0)), "server_manager: accept");
+				OPEN_CLCONN(server, newcfd);
+			}
+		}
+		/* Mainloop - 4 : Read from pipe and "restore listening" */
+		if ( (server->pfd[0] >= 0) && FD_ISSET(server->pfd[0], &server->rdset) ){ /* There is data to read in the (open) pipe */
+			ssize_t pret = read(server->pfd[0], server->readback, INTPIPEBUF);
+			int nums = (int)(pret/sizeof(int));
+			int rfd = 0;	
+			for (ssize_t j = 0; j < nums; j++){
+				rfd = server->readback[j];
+				if (rfd < 0){ /* A file has been closed */
+					rfd = fd_switch(rfd);
+					printf("Connection #%d closed by client\n", rfd);
+					CLOSE_CLCONN(server, rfd); /* Client has closed connection */
+				} else { RELISTEN(server, rfd); } /* Now can be listened again */
+			}
+		}
+	} /* end of while loop */
+	tsqueue_close(server->connQueue); /* Unblocks all workers */
+	printf("Manager - exiting\n");
+	return 0;
 }
 
 
@@ -319,6 +419,7 @@ void* server_manager(server_t* server){
 //TODO Stub
 void* server_worker(wArgs_t* wArgs){
 	printf("Thread worker %d\n", wArgs->workerId);
+	printf("Worker %d - exiting\n", wArgs->workerId);
 	return NULL;
 }
 
@@ -356,7 +457,7 @@ int server_start(server_t* server, wArgs_t** wArgs){
 void server_dump(server_t* server, FILE* stream){
 	if (!server) return;
 	if (!stream) stream = stdout; /* Default */
-	fprintf(stream, "server_dump: begin\n");
+	fprintf(stream, "********** SERVER DUMP **********\n");
 	DUMPVAR(stream, server_dump, server->sa.sun_path, char*);
 	DUMPVAR(stream, server_dump, server->pfd[0], int);
 	DUMPVAR(stream, server_dump, server->pfd[1], int);
@@ -366,8 +467,9 @@ void server_dump(server_t* server, FILE* stream){
 	DUMPVAR(stream, server_dump, server->clientResizeOffset, int);
 	DUMPVAR(stream, server_dump, server->maxlisten, int);
 	DUMPVAR(stream, server_dump, server->sockBacklog, int);
+	fprintf(stream, "server_dump: now dumping file storage information and statistics\n");
 	fs_dumpAll(server->fs);
-	fprintf(stream, "server_dump: end\n");
+	fprintf(stream, "********** SERVER DUMP **********\n");	
 }
 
 
@@ -377,10 +479,10 @@ void server_dump(server_t* server, FILE* stream){
  */
 int server_end(server_t* server){ 
 	SYSCALL_RETURN(wpool_joinAll(server->wpool), -1, "server_end: wpool_joinAll");
+	server_dump(server, stdout);
 	CLOSE_CHANNELS(server); /* Closes pipe and listen socket */
 	CLOSE_ALL_CFDS(server); /* Closed ALL (still active) client fds */
 	server->maxlisten = -1; /* No listening connection */
-	server_dump(server, stdout);
 	return 0;
 }
 
@@ -396,8 +498,7 @@ int server_end(server_t* server){
  */
 int server_destroy(server_t* server){
 	if (!server) return -1;
-	close(server->pfd[1]);
-	close(server->pfd[0]);
+	CLOSE_CHANNELS(server);
 	SYSCALL_EXIT(wpool_destroy(server->wpool), "server_destroy");
 	SYSCALL_EXIT(tsqueue_destroy(server->connQueue, free), "server_destroy");
 	SYSCALL_EXIT(fs_destroy(server->fs), "server_destroy");
@@ -472,7 +573,7 @@ int main(int argc, char* argv[]){
 	memset(&sa_term, 0, sizeof(sa_term));
 	sa_term.sa_handler = term_sighandler;
 	SYSCALL_EXIT(sigaction(SIGHUP, &sa_term, NULL), "sigaction[SIGHUP]");
-	//SYSCALL_EXIT(sigaction(SIGTSTP, &sa_term, NULL), "sigaction[SIGTSTP]");
+	SYSCALL_EXIT(sigaction(SIGTSTP, &sa_term, NULL), "sigaction[SIGTSTP]");
 	SYSCALL_EXIT(sigaction(SIGINT, &sa_term, NULL), "sigaction[SIGINT]");
 	SYSCALL_EXIT(sigaction(SIGQUIT, &sa_term, NULL), "sigaction[SIGQUIT]");
 
@@ -560,8 +661,8 @@ int main(int argc, char* argv[]){
 	}
 	
 	/* Mainloop and final joining/cleaning */
-	server_manager(server);
-	server_end(server);
+	SYSCALL_EXIT(server_manager(server), "server_manager");
+	SYSCALL_EXIT(server_end(server), "server_end");
 	
 	DESTROY_WARGS(wArgsArray, server->wpool->nworkers);
 	//server_dump(server, NULL);

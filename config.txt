@@ -18,7 +18,7 @@
 
 
 # Path of the server socket
-SocketPath = bin/tmp/socket 
+SocketPath = bin/tmp/serverSocket.sk 
 
 
 # Number of worker threads
