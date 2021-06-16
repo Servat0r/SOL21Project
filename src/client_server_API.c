@@ -70,7 +70,11 @@ static int result_msg(int result, char* msg, size_t size){
 			break;
 		}
 		case EINVAL: {
-			strncpy(msg, "Bad arguments passed", size);
+			strncpy(msg, "Invalid arguments passed", size);
+			break;
+		}
+		case E2BIG: {
+			strncpy(msg, "Too many files received from server", size);
 			break;
 		}
 		case ENOTRECOVERABLE: {
@@ -621,7 +625,7 @@ int writeFile(const char* pathname, const char* dirname){
  * read file(s)), -1 on error (errno set).
  * Possible errors are:
  *	- ENOMEM: unable to allocate memory for sending request to the server;
- *	- EMFILE: too many files sent back by server (returned only if N > 0);
+ *	- E2BIG: too many files sent back by server (returned only if N > 0);
  *	- EBADMSG: wrong message received by server or EOF read by a mrecv before
  *		having received all current message content;
  *	- EBADF: there is no active connection;
@@ -668,7 +672,7 @@ int	readNFiles(int N, const char* dirname){
 				msg_destroy(msg, free, free);
 				continue;
 			} else {
-				errno = EMFILE; /* Too many "available" files */
+				errno = E2BIG; /* Too many "available" files */
 				res = -1;
 				break;
 			}

@@ -16,20 +16,40 @@
 #include <protocol.h>
 #include <tsqueue.h>
 #include <server_support.h> //TODO wpool_t deve offrire la possibilità di sapere esattamente quali thread workers sono ancora in vita in OGNI momento!
+#include <signal.h>
+#include <limits.h>
 
 /* Flags for server state (see below) */
 #define S_OPEN 0
 #define S_CLOSED 1
 #define S_SHUTDOWN 2
 
-/* Default location of config file (used when not provided) */
-#define DFL_CONFIG "../config.txt"
+/* Default parameters for configuration */
+#define DFL_CONFIG "config.txt"
+#define DFL_MAXCLIENT 1023
+#define DFL_CLRESIZE 64
+
+
+/* #{buckets} for the dictionary for parsing config file */
+#define PARSEDICT_BUCKETS 5
+
+#if 0
+//FIXME WARNING: Questa macro NON distrugge anche le strutture dati interne del server!
+#define FREE_SERVER_RETURN(sc, server, ret, errmsg)
+do {
+	if ((sc) == -1){
+		perror(errmsg);
+		free(server);
+	}
+} while(0);
+#endif
+
 
 /* Options accepted by server */
 const optdef_t options[] = {
 	{"-c", 1, 1, allPaths, true, "path", "path of the configuration file (default is \"../config.txt\")"}
 	/* Add other options here */
-}
+};
 
 /* Length of options array */
 const int optlen = 1;
@@ -47,12 +67,12 @@ const int optlen = 1;
 static volatile sig_atomic_t serverState = S_OPEN;
 
 /* Global variable for hosting server address */
-static struct sockaddr_un sa;
+static char serverPath[UNIX_PATH_MAX];
 
 /* Minimum cleanup before exiting */
 void cleanup(void){
-	unlink(sa.sun_path);
-	memset(&sa, 0, sizeof(sa));
+	unlink(serverPath);
+	memset(serverPath, 0, sizeof(serverPath));
 }
 
 /* Signal handler for server termination */
@@ -69,21 +89,20 @@ void term_sighandler(int sig){
  */
 typedef struct server_s {
 
-	 /* Server address (socketPath and length of path) */
-	wpool_t wpool; /* Workers pool (contains #workers )*/
+	struct sockaddr_un sa; /* Server address (socketPath and length of path) */
+	wpool_t* wpool; /* Workers pool (contains #workers )*/
 	int pfd[2]; /* Pipe for receiving back fds */
 	/* 
 	* Array in which to store read fds from pipe
-	* This length guarantees that total space is
-	* multiple of lcm(ATOMPIPEBUF, sizeof(int)).
 	*/
-	int readback[ATOMPIPEBUF * sizeof(int)];
-	tsqueue_t connQueue; /* Concurrent queue for handling client requests dispatching */
+	int readback[_POSIX_PIPE_BUF];
+	tsqueue_t* connQueue; /* Concurrent queue for handling client requests dispatching */
 	FileStorage_t* fs; /* File storage (will contain storage size in bytes and fileStorageBuckets) */
 	int sockfd; /* Listen socket file descriptor */
 
 	int nactives; /* Number of active clients */
 	int maxclient; /* Maximum active client (initially maxClientAtStart as config param) */
+	int clientResizeOffset; /* Minimum #{client entries} to add when a new connfd is higher than current maximum */
 
 	int maxlisten; /* Maximum listened file descriptor */
 	fd_set rdset; /* File descriptors monitored for listening */
@@ -98,7 +117,7 @@ typedef struct server_s {
 
 /** Struct describing arguments to pass to workers */
 typedef struct wArgs_s {
-	server_t server;
+	server_t* server;
 	int workerId; /* Identifier [1, #workers] */
 } wArgs_t; //TODO Aggiungere altri campi se necessario
 
@@ -113,7 +132,68 @@ static int fd_switch(int fd){ return -fd-1; }
  * parameters.
  * @return server_t object pointer on success, NULL on error.
  */
-server_t* server_init(config_t* config);
+server_t* server_init(config_t* config){
+	if (!config) return NULL;
+	
+	server_t* server = malloc(sizeof(server_t));
+	if (!server) return NULL;
+	
+	/* Zeroes reading sets */
+	FD_ZERO(&server->rdset);
+	FD_ZERO(&server->saveset);
+	sigfillset(&server->psmask);
+	
+	/* Sets sigmask for pselect */
+	sigdelset(&server->psmask, SIGINT);
+	sigdelset(&server->psmask, SIGQUIT);
+	sigdelset(&server->psmask, SIGHUP);
+	
+	/* Initializes numerical fields */
+	memset(server->pfd, 0, sizeof(server->pfd));
+	server->sockfd = -1; /* No opened socket */
+	server->nactives = 0; /* No active connection */
+	server->maxlisten = -1; /* No listening */
+
+	/* Configures socket path */
+	memset(&server->sa, 0, sizeof(server->sa));
+	if (config->socketPath){
+		server->sa.sun_family = AF_UNIX;
+		strncpy(server->sa.sun_path, config->socketPath, UNIX_PATH_MAX);
+		strncpy(serverPath, config->socketPath, UNIX_PATH_MAX);
+	} else { /* (FATAL) ERROR */
+		free(server);
+		return NULL;
+	}
+	
+	/* Configures server numerical params */
+	server->sockBacklog = (config->sockBacklog > 0 ? config->sockBacklog : SOMAXCONN);
+	server->maxclient = (config->maxClientAtStart > 0 ? config->maxClientAtStart : DFL_MAXCLIENT);
+	server->clientResizeOffset = (config->clientResizeOffset > 0 ? config->clientResizeOffset : DFL_CLRESIZE);
+	
+	/* Configures workers pool */
+	server->wpool = wpool_init(config->workersInPool);
+	if (!server->wpool){ /* (FATAL) ERROR */
+		free(server);
+		return NULL;
+	}
+	
+	/* Configures filesystem */
+	server->fs = fs_init(config->fileStorageBuckets, KBVALUE * (size_t)config->storageSize, config->maxFileNo, config->maxClientAtStart);
+	if (!server->fs){
+		wpool_destroy(server->wpool);
+		free(server);
+		return NULL;
+	}
+	
+	/* Initializes connection queue */
+	server->connQueue = tsqueue_init();
+	if (!server->connQueue){
+		wpool_destroy(server->wpool);
+		fs_destroy(server->fs);
+		return NULL;
+	}
+	return server;
+}
 
 
 /**
@@ -144,12 +224,31 @@ void* server_worker(wArgs_t* wArgs);
 
 
 /**
- * @brief Joins workers pool and handles correct
- * termination of all initialized data structures
- * and server statistics dumping at end of mainloop.
+ * @brief Joins workers pool and handles server
+ * statistics stdout dumping at end of mainloop.
+ */
+int server_end(server_t* server);
+
+
+/**
+ * @brief Handles correct destruction of ALL 
+ * server internal data structures and of
+ * server itself.
+ * @note We suppose that by now, there is NO
+ * worker thread and listen socket has been
+ * ALREADY closed (e.g. in server_end).
  * @return 0 on success, -1 on error.
  */
-int server_destroy(server_t* server);
+int server_destroy(server_t* server){
+	if (!server) return -1;
+	close(server->pfd[1]);
+	close(server->pfd[0]);
+	SYSCALL_EXIT(wpool_destroy(server->wpool), "server_destroy");
+	SYSCALL_EXIT(tsqueue_destroy(server->connQueue, free), "server_destroy");
+	SYSCALL_EXIT(fs_destroy(server->fs), "server_destroy");
+	memset(server, 0, sizeof(*server));
+	return 0;
+}
 
 
 /**
@@ -194,19 +293,104 @@ int server_sbHandler(char* pathname, void* content, size_t size, int cfd, bool m
 }
 
 
-int main(int argc, char* argv){
+int main(int argc, char* argv[]){
 	config_t config;
 	server_t* server;
 	wArgs_t* wArgsArray; /* Array of worker arguments */ //TODO Calloc'd when #workers is known
+	struct sigaction sa_term, sa_ign; /* For registering signal handlers */
 	sigset_t sigmask; /* Sigmask for correct signal handling "dispatching" */
+	llist_t* optvals; /* For parsing cmdline options */
+	char configFile[MAXPATHSIZE]; /* Path of configuration file */
+	
+	memset(configFile, 0, sizeof(configFile));
+	/* Set default configuration file */
+	strncpy(configFile, DFL_CONFIG, strlen(DFL_CONFIG)+1);
+	
+	
+	/* Signals masking */
+	SYSCALL_EXIT(sigfillset(&sigmask), "sigfillset");
+	SYSCALL_EXIT(pthread_sigmask(SIG_SETMASK, &sigmask, NULL), "sigmask");
+	
+
+	/* Termination signals */
+	memset(&sa_term, 0, sizeof(sa_term));
+	sa_term.sa_handler = term_sighandler;
+	SYSCALL_EXIT(sigaction(SIGHUP, &sa_term, NULL), "sigaction[SIGHUP]");
+	//SYSCALL_EXIT(sigaction(SIGTSTP, &sa_term, NULL), "sigaction[SIGTSTP]");
+	SYSCALL_EXIT(sigaction(SIGINT, &sa_term, NULL), "sigaction[SIGINT]");
+	SYSCALL_EXIT(sigaction(SIGQUIT, &sa_term, NULL), "sigaction[SIGQUIT]");
+
+	/* Ignoring SIGPIPE */
+	memset(&sa_ign, 0, sizeof(sa_ign));
+	sa_ign.sa_handler = SIG_IGN;
+	SYSCALL_EXIT(sigaction(SIGPIPE, &sa_ign, NULL), "sigaction[SIGPIPE]");
+	
+	//TODO Spostare! wpool_runAll(&server->wpool, mtserver_work, (void*)server);
+
+	config_init(&config);
+	
+	/* Cmdline arguments parsing: if '-c' is NOT found, use default location for config.txt */
+	optvals = parseCmdLine(argc, argv, options, optlen);
+	if (!optvals){
+		fprintf(stderr, "Error while parsing command-line arguments\n");
+		exit(EXIT_FAILURE);
+	}
+	
+	llistnode_t* node;
+	optval_t* currOpt;
+	llist_foreach(optvals, node){
+		currOpt = (optval_t*)(node->datum);
+		if ( strequal(currOpt->def->name, "-c") ){
+			memset(configFile, 0, sizeof(configFile));
+			char* confpath = (char*)(currOpt->args->head->datum);
+			if (strlen(confpath)+1 > MAXPATHSIZE){
+				fprintf(stderr, "Error: config path too much long\n");
+				llist_destroy(optvals, optval_destroy);
+				exit(EXIT_FAILURE);
+			}
+			strncpy(configFile, confpath, strlen(confpath)+1);
+			break;
+		}
+	}
+	
+	llist_destroy(optvals, optval_destroy); /* Destroys parser result */
+	/* Now configFile is set either to default path or to provided path with '-c' */
+	
+	/* Parsing config file */
+	icl_hash_t* dict = icl_hash_create(PARSEDICT_BUCKETS, NULL, NULL);
+	if (!dict) exit(EXIT_FAILURE);
+	if ( !parseFile(configFile, dict) ){
+		perror("Error on parseFile\n");
+		icl_hash_destroy(dict, free, free);
+		exit(EXIT_FAILURE);
+	}
+	if (config_parsedict(&config, dict) != 0){
+		perror("Error on parsedict\n");
+		icl_hash_destroy(dict, free, free);
+		exit(EXIT_FAILURE);
+	}
+	SYSCALL_EXIT(icl_hash_destroy(dict, free, free), "icl_hash_destroy");
+
+	/* Initializing server */
+	server = server_init(&config);
+	CHECK_COND_EXIT( (server != NULL), "server_init");
+	
+	config_reset(&config); /* Frees socketPath field memory */
+	
+	/* Now serverPath contains path of listen socket and we register cleanup function */
+	if (atexit(cleanup) != 0){
+		fprintf(stderr, "Error while registering cleanup function\n");
+		SYSCALL_EXIT(server_destroy(server), "server_destroy");
+	}
+	
+	/* Initializing arguments for workers */
+	wArgsArray = calloc(server->wpool->nworkers, sizeof(wArgs_t));
+	if (!wArgsArray){ SYSCALL_EXIT(server_destroy(server), "server_destroy"); }
+	for (int i = 0; i < server->wpool->nworkers; i++) { wArgsArray[i].server = server; wArgsArray[i].workerId = i; };
+	
+	//TODO Here we still have signals disabled
 	
 	/* TODO:
-	0. Install signal handlers
-	1. Initialize config struct.
-	2. Parse cmdline arguments: if '-c' is NOT found, use default location for config.txt
-	3. Write config parameters into config struct.
-	4. Initialize server with config struct.
-	5. Initialize wArgsArray and pass it as argument for workers pool.
 	6. Call server_start with signals disabled: this will initialize all data structures and spawn all workers with signals disabled.
 	7. Enable SIGINT/SIGQUIT/SIGHUP and call server_manager, thus starting mainloop.
 	8. After exiting from server_manager (not-fatal exit, on fatal one there is minimum cleanup and exit),

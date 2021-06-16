@@ -49,6 +49,7 @@ int config_init(config_t* config){
  * @brief Resets config string pointers.
  */
 void config_reset(config_t* config){
+	free(config->socketPath);
 	config->socketPath = NULL;
 }
 

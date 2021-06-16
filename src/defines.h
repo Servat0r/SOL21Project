@@ -127,9 +127,9 @@
 #define CHECK_COND_EXIT(cond, str)	\
 	do { \
 		if (!(cond)) {				\
-		int errno_copy = errno;			\
-		perror(str); \
-		exit(errno_copy);			\
+			int errno_copy = errno;			\
+			perror(str); \
+			exit(errno_copy);			\
 		} \
     } while(0);
 
