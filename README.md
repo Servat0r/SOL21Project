@@ -30,6 +30,10 @@ http://didawiki.cli.di.unipi.it/lib/exe/fetch.php/informatica/sol/laboratorio21/
 
 `protocol.h` - Client-server request protocol.
 
+`server_support.h` - Support data structures for server.
+
+`server.c` - Server program.
+
 `tsqueue.h` - Thread-safe FIFO queue with embedded iterator.
 
 `util.h` - Miscellaneous utility functions and macros.

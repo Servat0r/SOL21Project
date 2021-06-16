@@ -33,6 +33,19 @@
 /* #{buckets} for the dictionary for parsing config file */
 #define PARSEDICT_BUCKETS 5
 
+/* Dumps variable of primitive type (char*, int, long, size_t) to the screen */
+#define DUMPVAR(stream, func, value, type)\
+do {\
+	char* format;\
+	if (strequal(#type, "char*")) format = "%s: %s = %s\n";\
+	else if (strequal(#type, "int")) format = "%s: %s = %d\n";\
+	else if (strequal(#type, "long")) format = "%s: %s = %ld\n";\
+	else if (strequal(#type, "size_t")) format = "%s: %s = %lu\n";\
+	else break;\
+	fprintf(stream, format, #func, #value, value);\
+} while(0);
+
+
 #if 0
 //FIXME WARNING: Questa macro NON distrugge anche le strutture dati interne del server!
 #define FREE_SERVER_RETURN(sc, server, ret, errmsg)
@@ -105,10 +118,11 @@ typedef struct server_s {
 	int clientResizeOffset; /* Minimum #{client entries} to add when a new connfd is higher than current maximum */
 
 	int maxlisten; /* Maximum listened file descriptor */
+	int maxhup; /* Maximum hanged-up file descriptor */
 	fd_set rdset; /* File descriptors monitored for listening */
 	fd_set saveset; /* Backup fd_set for reinitialization */
-	//fd_set hangupSet; /* Hanged up on lock file descriptors */
-	int sockBacklog; /* Defaults to SOMAXCONN */ //TODO Aggiungere a config.txt
+	fd_set hupset; /* Hanged up on lock file descriptors */
+	int sockBacklog; /* Defaults to SOMAXCONN */
 	
 	sigset_t psmask; /* Signal mask for pselect */
 	
@@ -141,6 +155,7 @@ server_t* server_init(config_t* config){
 	/* Zeroes reading sets */
 	FD_ZERO(&server->rdset);
 	FD_ZERO(&server->saveset);
+	FD_ZERO(&server->hupset);
 	sigfillset(&server->psmask);
 	
 	/* Sets sigmask for pselect */
@@ -153,6 +168,7 @@ server_t* server_init(config_t* config){
 	server->sockfd = -1; /* No opened socket */
 	server->nactives = 0; /* No active connection */
 	server->maxlisten = -1; /* No listening */
+	server->maxhup = -1; /* No hanged-up */
 
 	/* Configures socket path */
 	memset(&server->sa, 0, sizeof(server->sa));
@@ -178,7 +194,7 @@ server_t* server_init(config_t* config){
 	}
 	
 	/* Configures filesystem */
-	server->fs = fs_init(config->fileStorageBuckets, KBVALUE * (size_t)config->storageSize, config->maxFileNo, config->maxClientAtStart);
+	server->fs = fs_init(config->fileStorageBuckets, (KBVALUE * (size_t)config->storageSize), config->maxFileNo, config->maxClientAtStart);
 	if (!server->fs){
 		wpool_destroy(server->wpool);
 		free(server);
@@ -204,30 +220,60 @@ server_t* server_init(config_t* config){
  *	- opens pipe and tsqueue for internal communication;
  *	- initializes rdset and saveset for listening and all
  *	other relevant fields.
+ * @param wArgs -- Array of arguments for workers.
+ * @note wArgs MUST be of length equal to that of workers
+ * num, otherwise the program shall fail.
  * @return 0 on success, -1 on error.
  */
-int server_start(server_t* server);
+int server_start(server_t* server, wArgs_t* wArgs){
+	return 0;
+}
 
-//TODO Questo è chiamato DENTRO server_run!
+
 /**
  * @brief Manager function.
  * @return NULL.
  */
-void* server_manager(server_t* server);
+void* server_manager(server_t* server){
+	return 0;
+}
 
 
 /**
  * @brief Worker function.
  * @return NULL.
  */
-void* server_worker(wArgs_t* wArgs);
+void* server_worker(wArgs_t* wArgs){
+	return 0;
+}
+
+
+void server_dump(server_t* server, FILE* stream){
+	if (!server) return;
+	if (!stream) stream = stdout; /* Default */
+	fprintf(stream, "server_dump: begin\n");
+	DUMPVAR(stream, server_dump, server->sa.sun_path, char*);
+	DUMPVAR(stream, server_dump, server->pfd[0], int);
+	DUMPVAR(stream, server_dump, server->pfd[1], int);
+	DUMPVAR(stream, server_dump, server->sockfd, int);
+	DUMPVAR(stream, server_dump, server->nactives, int);
+	DUMPVAR(stream, server_dump, server->maxclient, int);
+	DUMPVAR(stream, server_dump, server->clientResizeOffset, int);
+	DUMPVAR(stream, server_dump, server->maxlisten, int);
+	DUMPVAR(stream, server_dump, server->sockBacklog, int);
+	DUMPVAR(stream, server_dump, server->maxhup, int);
+	fs_dumpAll(server->fs);
+	fprintf(stream, "server_dump: end\n");
+}
 
 
 /**
  * @brief Joins workers pool and handles server
  * statistics stdout dumping at end of mainloop.
  */
-int server_end(server_t* server);
+int server_end(server_t* server){ 
+	return 0;
+}
 
 
 /**
@@ -247,6 +293,7 @@ int server_destroy(server_t* server){
 	SYSCALL_EXIT(tsqueue_destroy(server->connQueue, free), "server_destroy");
 	SYSCALL_EXIT(fs_destroy(server->fs), "server_destroy");
 	memset(server, 0, sizeof(*server));
+	free(server);
 	return 0;
 }
 
@@ -296,7 +343,7 @@ int server_sbHandler(char* pathname, void* content, size_t size, int cfd, bool m
 int main(int argc, char* argv[]){
 	config_t config;
 	server_t* server;
-	wArgs_t* wArgsArray; /* Array of worker arguments */ //TODO Calloc'd when #workers is known
+	wArgs_t* wArgsArray; /* Array of worker arguments */
 	struct sigaction sa_term, sa_ign; /* For registering signal handlers */
 	sigset_t sigmask; /* Sigmask for correct signal handling "dispatching" */
 	llist_t* optvals; /* For parsing cmdline options */
@@ -360,12 +407,12 @@ int main(int argc, char* argv[]){
 	icl_hash_t* dict = icl_hash_create(PARSEDICT_BUCKETS, NULL, NULL);
 	if (!dict) exit(EXIT_FAILURE);
 	if ( !parseFile(configFile, dict) ){
-		perror("Error on parseFile\n");
+		perror("Error on parseFile");
 		icl_hash_destroy(dict, free, free);
 		exit(EXIT_FAILURE);
 	}
 	if (config_parsedict(&config, dict) != 0){
-		perror("Error on parsedict\n");
+		perror("Error on parseDict");
 		icl_hash_destroy(dict, free, free);
 		exit(EXIT_FAILURE);
 	}
@@ -388,14 +435,17 @@ int main(int argc, char* argv[]){
 	if (!wArgsArray){ SYSCALL_EXIT(server_destroy(server), "server_destroy"); }
 	for (int i = 0; i < server->wpool->nworkers; i++) { wArgsArray[i].server = server; wArgsArray[i].workerId = i; };
 	
-	//TODO Here we still have signals disabled
+	if (server_start(server, wArgsArray) == -1){
+		free(wArgsArray);
+		SYSCALL_EXIT(server_destroy(server), "server_destroy");
+		exit(EXIT_FAILURE);
+	}
 	
-	/* TODO:
-	6. Call server_start with signals disabled: this will initialize all data structures and spawn all workers with signals disabled.
-	7. Enable SIGINT/SIGQUIT/SIGHUP and call server_manager, thus starting mainloop.
-	8. After exiting from server_manager (not-fatal exit, on fatal one there is minimum cleanup and exit),
-		call server_destroy for termination of the program.
-	9. Exit with success.
-	*/
+	SYSCALL_EXIT(server_manager(server), "server_manager");
+	SYSCALL_EXIT(server_end(server), "server_end");
+	
+	free(wArgsArray);
+	server_dump(server, NULL);
+	SYSCALL_EXIT(server_destroy(server), "server_destroy");
 	return 0;
 }
