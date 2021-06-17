@@ -20,8 +20,6 @@ typedef struct config_s {
 	int workersInPool; /* default = 0 */
 	long storageSize; /* In KB, default = 0 */
 	int maxFileNo; /* default = 0 */
-	int maxClientAtStart; /* default = 0 */
-	int clientResizeOffset; /* default = 0 */
 	int fileStorageBuckets; /* default = 0 */
 	int sockBacklog; /* default = 0 */
 
@@ -122,8 +120,6 @@ int config_parsedict(config_t* config, icl_hash_t* dict){
 		STORAGE_SETATTR(name, "StorageMBSize", datum, config->storageSize, MBVALUE);
 		STORAGE_SETATTR(name, "StorageKBSize", datum, config->storageSize, 1);
 		NUM_SETATTR(name, "MaxFileNo", datum, config->maxFileNo);
-		NUM_SETATTR(name, "MaxClientAtStart", datum, config->maxClientAtStart);
-		NUM_SETATTR(name, "ClientResizeOffset", datum, config->clientResizeOffset);
 		NUM_SETATTR(name, "FileStorageBuckets", datum, config->fileStorageBuckets);
 		NUM_SETATTR(name, "SockBacklog", datum, config->sockBacklog);
 	}
@@ -142,8 +138,6 @@ void config_printout(config_t* config){
 	printf("WorkersInPool = %d\n", config->workersInPool);
 	printf("StorageSize (KB) = %ld\n", config->storageSize);
 	printf("MaxFileNo = %d\n", config->maxFileNo);	
-	printf("MaxClientAtStart = %d\n", config->maxClientAtStart);
-	printf("ClientResizeOffset = %d\n", config->clientResizeOffset);
 	printf("SockBacklog = %d\n", config->sockBacklog);
 	printf("FileStorageBuckets = %d\n", config->fileStorageBuckets);
 	printf("No more attributes\n");

@@ -12,8 +12,6 @@
 #	- WorkersInPool > 0;
 #	- Total sum of "Storage*" > 0;
 #	- MaxFileNo > 0;
-#	- MaxClientAtStart > 0;
-#	- ClientCleanupBufSize > 0;
 #	- FileStorageBuckets > 0.
 
 
@@ -40,16 +38,6 @@ StorageKBSize = 0
 
 # Max File Capacity of the server
 MaxFileNo = 100
-
-
-# Initial value of the 'maxclient' field for server_t, FileStorage_t and FielData_t objects.
-MaxClientAtStart = 256
-
-
-# Minimum factor to add to maxclient field of a server_t* and FileStorage_t*
-# objects when there is a connection with higher file descriptor.
-# Effective resize offset is MAX(maxclient + offset, newclientfd).
-ClientResizeOffset = 64
 
 
 # Number of buckets of the file storage.

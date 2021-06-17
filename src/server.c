@@ -27,8 +27,6 @@
 
 /* Default parameters for configuration */
 #define DFL_CONFIG "config.txt"
-#define DFL_MAXCLIENT 1023
-#define DFL_CLRESIZE 64
 /* #{buckets} for the dictionary for parsing config file */
 #define PARSEDICT_BUCKETS 5
 /**
@@ -231,10 +229,6 @@ typedef struct server_s {
 	FileStorage_t* fs; /* File storage (will contain storage size in bytes and fileStorageBuckets) */
 	int sockfd; /* Listen socket file descriptor */
 	int sockBacklog; /* Defaults to SOMAXCONN */
-
-	/* Internal state for client resizing */
-	int maxclient; /* Maximum active client fd (initially maxClientAtStart as config param) */
-	int clientResizeOffset; /* Minimum #{client entries} to add when a new connfd is higher than current maximum */
 	
 	/* Internal state for all active client connections */
 	int nactives; /* Number of active clients */
@@ -301,8 +295,6 @@ server_t* server_init(config_t* config){
 	
 	/* Configures server numerical params */
 	server->sockBacklog = (config->sockBacklog > 0 ? config->sockBacklog : SOMAXCONN);
-	server->maxclient = (config->maxClientAtStart > 0 ? config->maxClientAtStart : DFL_MAXCLIENT);
-	server->clientResizeOffset = (config->clientResizeOffset > 0 ? config->clientResizeOffset : DFL_CLRESIZE);
 	
 	/* Configures workers pool */
 	server->wpool = wpool_init(config->workersInPool);
@@ -312,7 +304,7 @@ server_t* server_init(config_t* config){
 	}
 	
 	/* Configures filesystem */
-	server->fs = fs_init(config->fileStorageBuckets, (KBVALUE * (size_t)config->storageSize), config->maxFileNo, config->maxClientAtStart);
+	server->fs = fs_init(config->fileStorageBuckets, (KBVALUE * (size_t)config->storageSize), config->maxFileNo);
 	if (!server->fs){
 		wpool_destroy(server->wpool);
 		free(server);
@@ -387,14 +379,7 @@ int server_manager(server_t* server){
 			if ( FD_ISSET(server->sockfd, &server->rdset) ){
 				int newcfd;
 				SYSCALL_EXIT((newcfd = accept(server->sockfd, NULL, 0)), "server_manager: accept");
-				if (newcfd > server->maxclient){ /* Need to resize maxclient field for all files */
-					FD_SET(newcfd, &server->clientset); /* It is an ACTIVE client connection, but that cannot work for now */
-					newcfd = fd_switch(newcfd);
-					int* p = malloc(sizeof(int));
-					if (!p) exit(EXIT_FAILURE);
-					*p = newcfd;
-					SYSCALL_EXIT(tsqueue_push(server->connQueue, p), "server_manager: tsqueue_push for resizing");	
-				} else { OPEN_CLCONN(server, newcfd); }
+				OPEN_CLCONN(server, newcfd);
 			}
 		}
 		/* Mainloop - 4 : Read from pipe and "restore listening" */
@@ -408,11 +393,7 @@ int server_manager(server_t* server){
 					rfd = fd_switch(rfd);
 					printf("Connection #%d closed by client\n", rfd);
 					CLOSE_CLCONN(server, rfd); /* Client has closed connection */
-				} else {
-					 /* A successful resizing */
-					if (rfd > server->maxclient) server->maxclient = rfd; //MAX(rfd, server->maxclient + server->clientResizeOffset);
-					RELISTEN(server, rfd); /* Now can be listened again */
-				}
+				} else { RELISTEN(server, rfd); } /* Now can be listened again */
 			}
 		}
 	} /* end of while loop */
@@ -445,10 +426,7 @@ void* server_worker(wArgs_t* wArgs){
 		SYSCALL_EXIT( (qret = tsqueue_pop(server->connQueue, &cfd, false)) , "server_worker: tsqueue_pop");
 		if (qret > 0) break; /* Queue closed and empty */
 		int errno_copy = errno; /* Needs this to save preceeding values of errno (?) */
-		if (*cfd < 0){ /* Need to update maxclient */
-			*cfd = fd_switch(*cfd);
-			SYSCALL_EXIT( fs_resize(fs, *cfd) , "server_worker: fs_resize");
-		} else {
+		if (*cfd > 0){
 			recv_ret = mrecv(*cfd, &msg1, NULL, NULL);
 			if (recv_ret == -1){ //msg1 == NULL [this branch is okay]
 				/* connection closed */
@@ -556,8 +534,6 @@ void server_dump(server_t* server, FILE* stream){
 	DUMPVAR(stream, server_dump, server->pfd[1], int);
 	DUMPVAR(stream, server_dump, server->sockfd, int);
 	DUMPVAR(stream, server_dump, server->nactives, int);
-	DUMPVAR(stream, server_dump, server->maxclient, int);
-	DUMPVAR(stream, server_dump, server->clientResizeOffset, int);
 	DUMPVAR(stream, server_dump, server->maxlisten, int);
 	DUMPVAR(stream, server_dump, server->sockBacklog, int);
 	fprintf(stream, "server_dump: now dumping file storage information and statistics\n");

@@ -49,7 +49,7 @@ struct arg_s {
 
 int whandler_stub(tsqueue_t* waitQueue){ return 0; }
 
-int sbhandler_stub(void* content, size_t size, int cfd){ return 0; }
+int sbhandler_stub(void* content, size_t size, int cfd, bool modified){ return 0; }
 
 /** @brief First testcase thread function */
 void* firstTest(struct arg_s* arg){
@@ -152,7 +152,7 @@ void* sixthTest_createwrite(struct arg_s* arg){
 	assert(fs_unlock(fs, filename, 0, &newowner) == 0);
 	//assert(fs_remove(fs, filename, 0, &whandler_stub) == -1);
 	printf("newowner_size = %d\n", newowner->size);
-	if (newowner->size > 0) printf("newowner_clientId = %d\n", newowner->head->datum);
+	if (newowner->size > 0) printf("newowner_clientId = %d\n", *((int*)newowner->head->datum));
 	assert(fs_close(fs, filename, 0) == 0);
 	assert(fs_clientCleanup(fs, 0, &newowner) == 0);
 	assert(llist_destroy(newowner, free) == 0);
@@ -235,7 +235,7 @@ int main(void){
 
 	FileStorage_t* fs;
 	
-	assert((fs = fs_init(4, 512, 6, 24)) != NULL); /* 1/2 KB capacity, 6 maxFileNo and 25 possible clients (0-24) */
+	assert((fs = fs_init(4, 512, 6)) != NULL); /* 1/2 KB capacity, 6 maxFileNo and 25 possible clients (0-24) */
 
 	args1_2.fs = fs;
 	for (int i = 0; i < 3; i++){ args3[i].fs = fs; args4[i].fs = fs; args6[i].fs = fs; }
@@ -253,7 +253,7 @@ int main(void){
 
 	/* Second test */
 	printf("\nSECOND TEST RESULT:\n");
-	args1_2.who = 10; //FIXME Ora il resizing è "centralizzato" /* For testing correct resizing of fdata_t 'clients' field */
+	args1_2.who = DFL_MAXCLIENT + 10; /* For testing correct resizing of fdata_t 'clients' field */
 	pthread_create(&p[0], NULL, secondTest, &args1_2);
 	pthread_create(&p[1], NULL, secondTest, &args1_2);
 	pthread_join(p[0], NULL);

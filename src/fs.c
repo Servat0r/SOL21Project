@@ -19,7 +19,7 @@ do { \
 do {\
 	free(pathcopy1);\
 	free(pathcopy2);\
-	SYSCALL_NOTREC(fs, fdata_destroy(file), errmsg);\
+	SYSCALL_NOTREC(fdata_destroy(file), -1, errmsg);\
 	return -1;\
 } while(0);\
 
@@ -261,7 +261,6 @@ int fs_op_downgrade(FileStorage_t* fs){
  * @param nbuckets -- Number of buckets for the hashtable.
  * @param storageCap -- Byte-size storage capacity of fs.
  * @param maxFileNo -- File capacity of fs.
- * @param maxclient -- Initial maximum client identifier accepted by fs.
  * @return A FileStorage_t object pointer on success, NULL on error.
  * Possible errors are:
  *	- EINVAL: invalid arguments;
@@ -269,14 +268,13 @@ int fs_op_downgrade(FileStorage_t* fs){
  *	- any error by pthread_mutex_init/destroy, by tsqueue_init/destroy and by
  *	icl_hash_create.
  */
-FileStorage_t* fs_init(int nbuckets, size_t storageCap, int maxFileNo, int maxclient){
-	if ((storageCap == 0) || (maxFileNo <= 0) || (nbuckets <= 0) || (maxclient < 0)){ errno = EINVAL; return -1; }
+FileStorage_t* fs_init(int nbuckets, size_t storageCap, int maxFileNo){
+	if ((storageCap == 0) || (maxFileNo <= 0) || (nbuckets <= 0)){ errno = EINVAL; return NULL; }
 	FileStorage_t* fs = malloc(sizeof(FileStorage_t));
 	if (!fs) return NULL;
 	memset(fs, 0, sizeof(FileStorage_t));
 	fs->maxFileNo = maxFileNo;
 	fs->storageCap = storageCap;
-	fs->maxclient = maxclient;
 	
 	MTX_INIT(&fs->gblock, NULL);
 	
@@ -292,7 +290,7 @@ FileStorage_t* fs_init(int nbuckets, size_t storageCap, int maxFileNo, int maxcl
 	if (!fs->fmap){
 		MTX_DESTROY(&fs->gblock);
 		/* Unavoidable memory leak */
-		SYSCALL_NOTREC(tsqueue_destroy(fs->replQueue, dummy), -1, "fs_init: while destroying FIFO replacement queue after error on initialization");
+		SYSCALL_NOTREC(tsqueue_destroy(fs->replQueue, dummy), NULL, "fs_init: while destroying FIFO replacement queue after error on initialization");
 		free(fs);
 		errno = ENOMEM;
 		return NULL;
@@ -302,54 +300,24 @@ FileStorage_t* fs_init(int nbuckets, size_t storageCap, int maxFileNo, int maxcl
 
 
 /**
- * @brief Resizes client-array of ALL files at once such that ALL files would
- * have their maxclient field >= newmax.
- * @param newmax -- New minimum value for maximum client id for ALL files.
- * @return 0 on success, -1 on error, exits on error while resizing.
- * Possible errors are:
- *	- EINVAL: invalid arguments.
- */
-int	fs_resize(FileStorage_t* fs, int newmax){
-	if (newmax < 0){ errno = EINVAL; return -1; }
-	int tmpint;
-	icl_entry_t* tmpent;
-	char* filename;
-	FileData_t* file;
-	fs_wop_init(fs);
-	if (fs->maxclient < newmax){
-		icl_hash_foreach(fs->fmap, tmpint, tmpent, filename, file){
-			/* Unavoidable inconsistent state: there could be a client identifier that causes EINVAL on a file and nothing on another */
-			FS_NOTREC_UNLOCK(fs, fdata_resize(file, newmax), "fs_resize: while resizing file's client-array");
-		}
-		fs->maxclient = newmax;
-	}
-	fs_op_end(fs);
-	return 0;
-}
-
-
-/**
  * @brief Creates a new file by creating a new FileData_t object and putting it
  * in the hashtable.
- * @param maxclients -- Length of 'clients' field of the new FileData_t object.
  * @param client -- File descriptor of the creator.
  * @return 0 on success, -1 on error.
  * Possible errors are:
- *	- EINVAL: invalid arguments (including a client identifier > the current
- *	maximum: this is used for controlling maxclient field of FileData_t objects).
+ *	- EINVAL: invalid arguments;
  *	- EEXIST: the file is already existing;
  *	- any error by fs_replace, fs_search, fdata_create, make_entry,
  * icl_hash_insert, tsqueue_push. 
  */
 int	fs_create(FileStorage_t* fs, char* pathname, int client, bool locking, int (*waitHandler)(tsqueue_t* waitQueue)){
-	int maxclients = fs->maxclient;
-	if (!pathname || (client < 0) || (maxclients < client) || !waitHandler){ errno = EINVAL; return -1; }
-	int ret = 0;
+	if (!pathname || (client < 0) || !waitHandler){ errno = EINVAL; return -1; }
 	FileData_t* file;
 	bool bcreate = false;
 	
 	/* Create the file separately from file storage */
-	file = fdata_create(maxclients, client, locking); /* Since this is a new file, it is automatically locked */
+	int maxclient = MAX(client, DFL_MAXCLIENT);
+	file = fdata_create(maxclient, client, locking); /* Since this is a new file, it is automatically locked */
 	if (!file){
 		perror("While creating file");
 		return -1;

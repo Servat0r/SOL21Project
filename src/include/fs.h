@@ -30,6 +30,9 @@
 #define R_CREATE 1
 #define R_WRITE 2
 
+/* Default maxclient value for fdata_create */
+#define DFL_MAXCLIENT 1023
+
 
 /**
  * @brief Struct for hosting <size, content> couples for fs_readN.
@@ -53,7 +56,6 @@ typedef struct FileStorage_s {
 	pthread_cond_t conds[2]; /* actives[i] == #{threads sospesi per un'operazione di tipo i} */	
 	int state; /* actives[i] == #{threads attivi su un'operazione di tipo i} */
 
-	int maxclient; /* (GLOBAL) maximum client number */
 	int maxFileNo; /* Maximum number of storable files */
 	size_t storageCap; /* Storage capacity in KBytes */
 	tsqueue_t* replQueue; /* FIFO queue for tracing file(s) to remove */
@@ -75,15 +77,14 @@ void
 
 
 	/* Creation / Destruction */
-	FileStorage_t* fs_init(int nbuckets, size_t storageCap, int maxFileNo, int maxclient);
+	FileStorage_t* fs_init(int nbuckets, size_t storageCap, int maxFileNo);
 	int	fs_destroy(FileStorage_t* fs);
 
 int
 	/* Modifying operations */
-	fs_create(FileStorage_t* fs, char* pathname, int creator, bool locking, int (*waitHandler)(tsqueue_t* waitQueue)),
+	fs_create(FileStorage_t* fs, char* pathname, int client, bool locking, int (*waitHandler)(tsqueue_t* waitQueue)),
 	fs_clientCleanup(FileStorage_t* fs, int client, llist_t** newowners_list),
 	fs_remove(FileStorage_t* fs, char* pathname, int client, int (*waitHandler)(tsqueue_t* waitQueue)),
-	fs_resize(FileStorage_t* fs, int newmax),
 	
 	/* Non-modifying operations that DO NOT call modifying ones */
 	fs_open(FileStorage_t* fs, char* pathname, int client, bool locking),

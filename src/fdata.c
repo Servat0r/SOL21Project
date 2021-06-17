@@ -1,13 +1,31 @@
 #include <fdata.h>
 
 /**
- * @brief Utility macro for checking that client identifier is "in range".
+ * @brief Utility macro for all-in-one rdlocking
+ * and resizing client array if needed.
  */
-#define CHECK_MAXCLIENT(fdata, client, retval) \
+#define RD_CLIENT_RESIZE(fdata, client, retval) \
 	do { \
+		RWL_RDLOCK(&fdata->lock);\
 		if (client > fdata->maxclient){ \
-			errno = EINVAL; \
-			*retval = -1; \
+			RWL_UNLOCK(&fdata->lock);\
+			*retval = fdata_resize(fdata, client);\
+			RWL_RDLOCK(&fdata->lock);\
+		} \
+	} while (0);
+
+
+/**
+ * @brief Utility macro for all-in-one wrlocking
+ * and resizing client array if needed.
+ */
+#define WR_CLIENT_RESIZE(fdata, client, retval) \
+	do { \
+		RWL_WRLOCK(&fdata->lock);\
+		if (client > fdata->maxclient){ \
+			RWL_UNLOCK(&fdata->lock);\
+			*retval = fdata_resize(fdata, client);\
+			RWL_WRLOCK(&fdata->lock);\
 		} \
 	} while (0);
 
@@ -129,9 +147,7 @@ int fdata_open(FileData_t* fdata, int client, bool locking){ /* -> fs_open */
 	
 	int ret = 0;
 	
-	RWL_RDLOCK(&fdata->lock);
-	
-	CHECK_MAXCLIENT(fdata, client, &ret);
+	RD_CLIENT_RESIZE(fdata, client, &ret);
 	
 	if (ret == 0){
 		fdata->clients[client] |= LF_OPEN;
@@ -165,8 +181,7 @@ int fdata_close(FileData_t* fdata, int client){ /* -> fs_close */
 	if (client < 0){ errno = EINVAL; return -1; }
 	int ret = 0;
 	
-	RWL_RDLOCK(&fdata->lock);
-	CHECK_MAXCLIENT(fdata, client, &ret);
+	RD_CLIENT_RESIZE(fdata, client, &ret);
 	
 	if (ret == 0){
 		fdata->clients[client] &= ~LF_OPEN; /* file closed */
@@ -197,8 +212,7 @@ int fdata_read(FileData_t* fdata, void** buf, size_t* size, int client, bool ign
 	if (!buf || !size || (client < 0)){ errno = EINVAL; return -1; }
 	int ret = 0; /* return value */
 	
-	RWL_RDLOCK(&fdata->lock);
-	CHECK_MAXCLIENT(fdata, client, &ret);
+	RD_CLIENT_RESIZE(fdata, client, &ret);
 	/* If ign_open == true, this check shall be skipped */
 	if ( (ret == 0) && !ign_open && (fdata->flags & O_LOCK) && !(fdata->clients[client] & LF_OWNER) ){
 		errno = EBUSY;
@@ -250,8 +264,7 @@ int	fdata_write(FileData_t* fdata, void* buf, size_t size, int client, bool wr){
 	if (!buf || (size < 0) || (client < 0)){ errno = EINVAL; return -1; }
 	int ret = 0; /* return value */
 	
-	RWL_WRLOCK(&fdata->lock);
-	CHECK_MAXCLIENT(fdata, client, &ret);
+	WR_CLIENT_RESIZE(fdata, client, &ret);
 	if (ret == 0){
 		if ((fdata->flags & O_LOCK) && !(fdata->clients[client] & LF_OWNER)){ /* File is locked by another client */
 			errno = EBUSY;
@@ -310,8 +323,7 @@ int fdata_lock(FileData_t* fdata, int client){
 	if (client < 0){ errno = EINVAL; return -1; }
 	int ret = 0; /* return value */
 	
-	RWL_WRLOCK(&fdata->lock);
-	CHECK_MAXCLIENT(fdata, client, &ret);	
+	WR_CLIENT_RESIZE(fdata, client, &ret);	
 	if ((ret == 0) && (fdata->flags & O_LOCK) && !(fdata->clients[client] & LF_OWNER)){
 		int* wfd = malloc(sizeof(int));
 		if (!wfd){
@@ -356,8 +368,7 @@ int fdata_unlock(FileData_t* fdata, int client, llist_t** newowner){
 	int ret = 0;	
 	int* n_own = NULL;
 	
-	RWL_WRLOCK(&fdata->lock);
-	CHECK_MAXCLIENT(fdata, client, &ret);
+	WR_CLIENT_RESIZE(fdata, client, &ret);
 	if ((ret == 0) && (fdata->clients[client] & LF_OWNER)){
 		fdata->clients[client] &= ~LF_OWNER;
 		int w;
@@ -391,8 +402,7 @@ int fdata_removeClient(FileData_t* fdata, int client, llist_t** newowner){
 	if ((client < 0) || !newowner){ errno = EINVAL; return -1; }
 	int ret = 0;
 	
-	RWL_RDLOCK(&fdata->lock);	
-	CHECK_MAXCLIENT(fdata, client, &ret);
+	WR_CLIENT_RESIZE(fdata, client, &ret);
 	if (ret == 0) fdata->clients[client] &= ~(LF_OPEN | LF_WRITE); /* These can be safely eliminated here */
 	/*
 	All FD_NOTREC_UNLOCK below are done because an incorrect client-cleanup CANNOT guarantee a future consistent state of what any client
