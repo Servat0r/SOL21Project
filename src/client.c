@@ -59,9 +59,15 @@ do { \
 	char* filename; \
 	llist_foreach(args, node){ \
 		filename = (char*)(node->datum); \
+		if (!isAbsPath(filename)){\
+			fprintf(stderr, "%s: %s is NOT an asbolute path\n", #apiFunc, filename);\
+			*ret = -1;\
+			break;\
+		}\
 		if ((apiFunc(filename) == -1) && (errno != EBADE)){ \
 			perror(#apiFunc); \
 			*ret = -1;\
+			break;\
 		} \
 	} \
 } while(0);
@@ -298,13 +304,13 @@ int w_handler(optval_t* wopt, char* dirname){
  * after any successful {openFile, readFile, closeFile}
  * (usually got by the following '-d' option, or NULL).
  * @return 0 on success, -1 on error.
- * @note Instead of w_handler, here we create absolute
+ * @note Instead of w_handler, here we check for absolute
  * paths rather than getting them from a subcall.
  */
 int r_handler(optval_t* ropt, char* dirname){
 	if (!ropt) return -1;
 	int ret;
-	char* realFilePath;
+	char* pathname;
 	llistnode_t* node;
 	llist_t* files = ropt->args;
 	void* filebuf = NULL;
@@ -314,27 +320,25 @@ int r_handler(optval_t* ropt, char* dirname){
 		ret = 0;
 		filebuf = NULL;
 		filesize = 0;
-		if ( !(realFilePath = realpath((char*)(node->datum), NULL)) ){
+		pathname = (char*)(node->datum);
+		if ( !isAbsPath(pathname) ){
 			perror("r_handler: while getting absolute path of file");
 			ret = -1;
 			break; /* Nothing needs to be deallocated here */
-		} else if (openFile(realFilePath, 0) == -1){
-			free(realFilePath); /* This always */
+		} else if (openFile(pathname, 0) == -1){
 			if (errno != EBADE){
 				perror("r_handler: openFile");
 				ret = -1;
 				break;
 			}
 			/* Try to continue with next file (not-fatal server error)*/
-		} else if (readFile(realFilePath, &filebuf, &filesize) == -1){
-			free(realFilePath);
+		} else if (readFile(pathname, &filebuf, &filesize) == -1){
 			if (errno != EBADE){
 				perror("r_handler: readFile");
 				ret = -1;
 				break;
 			}
-		} else if (closeFile(realFilePath) == -1){
-			free(realFilePath);
+		} else if (closeFile(pathname) == -1){
 			free(filebuf); /* Contains data read or is NULL (=> no operation) */
 			filebuf = NULL;
 			filesize = 0;
@@ -344,16 +348,14 @@ int r_handler(optval_t* ropt, char* dirname){
 				break;
 			}
 		} else { /* All operations done successfully */
-			if (saveFile(realFilePath, dirname, filebuf, filesize) == -1){
-				fprintf(stderr, "Error while saving file '%s' to disk\n", realFilePath);
+			if (saveFile(pathname, dirname, filebuf, filesize) == -1){
+				fprintf(stderr, "Error while saving file '%s' to disk\n", pathname);
 			}
 			free(filebuf);
 			filebuf = NULL;
 			filesize = 0;
-			free(realFilePath);
 		}
 	}
-	/* realFilePath and filebuf are ALWAYS freed here */
 	return ret;
 }
 
