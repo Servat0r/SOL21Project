@@ -21,14 +21,27 @@ bool noArgs(llist_t* args){
 
 /**
  * @brief Checks if all elements in args are valid path strings.
- * @return true if condition is verified, false otherwise or if
- * args is NULL.
+ * @return true if condition is verified, false otherwise or if args is NULL.
  */
 bool allPaths(llist_t* args){
 	llistnode_t* node;
 	if (!args) return false;
 	llist_foreach(args, node){
 		if (!isPath(node->datum)) return false;
+	}
+	return true;
+}
+
+
+/**
+ * @brief Checks if all elements in args are valid absolute path strings.
+ * @return true if condition is verified, false otherwise or if args is NULL.
+ */
+bool allAbsPaths(llist_t* args){
+	llistnode_t* node;
+	if (!args) return false;
+	llist_foreach(args, node){
+		if (!isAbsPath((char*)node->datum)) return false;
 	}
 	return true;
 }

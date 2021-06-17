@@ -19,7 +19,6 @@
 #include <signal.h>
 #include <limits.h>
 
-//#define _SERVER_DEBUG_MODE_
 
 /* Flags for server state (see below) */
 #define S_OPEN 0
@@ -340,7 +339,7 @@ int server_manager(server_t* server){
 	int* nfd = NULL;
 	int cfd = 0;
 	int dispatched = 0;
-	printf("Thread manager 0\n"); //TODO L'identificatore del thread manager è 0
+	printf("Thread manager (0)\n"); //TODO L'identificatore del thread manager è 0
 	while (true){
 		
 		/* Mainloop 0 - Handle S_CLOSED server termination and reset readback array */
@@ -388,7 +387,14 @@ int server_manager(server_t* server){
 			if ( FD_ISSET(server->sockfd, &server->rdset) ){
 				int newcfd;
 				SYSCALL_EXIT((newcfd = accept(server->sockfd, NULL, 0)), "server_manager: accept");
-				OPEN_CLCONN(server, newcfd);
+				if (newcfd > server->maxclient){ /* Need to resize maxclient field for all files */
+					FD_SET(newcfd, &server->clientset); /* It is an ACTIVE client connection, but that cannot work for now */
+					newcfd = fd_switch(newcfd);
+					int* p = malloc(sizeof(int));
+					if (!p) exit(EXIT_FAILURE);
+					*p = newcfd;
+					SYSCALL_EXIT(tsqueue_push(server->connQueue, p), "server_manager: tsqueue_push for resizing");	
+				} else { OPEN_CLCONN(server, newcfd); }
 			}
 		}
 		/* Mainloop - 4 : Read from pipe and "restore listening" */
@@ -402,7 +408,11 @@ int server_manager(server_t* server){
 					rfd = fd_switch(rfd);
 					printf("Connection #%d closed by client\n", rfd);
 					CLOSE_CLCONN(server, rfd); /* Client has closed connection */
-				} else { RELISTEN(server, rfd); } /* Now can be listened again */
+				} else {
+					 /* A successful resizing */
+					if (rfd > server->maxclient) server->maxclient = rfd; //MAX(rfd, server->maxclient + server->clientResizeOffset);
+					RELISTEN(server, rfd); /* Now can be listened again */
+				}
 			}
 		}
 	} /* end of while loop */
@@ -416,10 +426,93 @@ int server_manager(server_t* server){
  * @brief Worker function.
  * @return NULL.
  */
-//TODO Stub
 void* server_worker(wArgs_t* wArgs){
-	printf("Thread worker %d\n", wArgs->workerId);
-	printf("Worker %d - exiting\n", wArgs->workerId);
+	printf("Thread worker (%d)\n", wArgs->workerId);
+	int wID = wArgs->workerId;
+	server_t* server = wArgs->server;
+	int qret = 0;
+	int* cfd;
+	message_t* msg1;
+	message_t* msg2;
+	char* currFilePath;
+	size_t fpsize;
+	int funcRet;
+	int recv_ret, send_ret;
+	while (true){
+		currFilePath = NULL;
+		funcRet = 0;
+		fpsize = 0;
+		SYSCALL_EXIT( (qret = tsqueue_pop(server->connQueue, &cfd, false)) , "server_worker: tsqueue_pop");
+		if (qret > 0) break; /* Queue closed and empty */
+		int errno_copy = errno; /* Needs this to save preceeding values of errno (?) */
+		if (*cfd < 0){ /* Need to update maxclient */
+			*cfd = fd_switch(*cfd);
+			SYSCALL_EXIT( fs_resize(fs, *cfd) , "server_worker: fs_resize");
+		} else {
+			recv_ret = mrecv(*cfd, &msg1, NULL, NULL);
+			if (recv_ret == -1){ //msg1 == NULL [this branch is okay]
+				/* connection closed */
+				if (errno == EBADMSG){
+					*cfd = fd_switch(*cfd);
+					SYSCALL_EXIT( write(server->pfd[1], cfd, sizeof(int)) , "server_worker: while sending back fd");
+					free(cfd);
+					continue;
+				} else {
+					perror("server_worker: while getting message");
+					free(cfd);
+					break; /* Exits mainloop */
+				} //FIXME SURE??
+			}
+			//Success
+			switch(msg1->type){
+				case M_OK:
+				case M_ERR:
+				case M_GETF: {
+					//Invalid messages
+					break;
+				}
+				case M_READF: { /* filename */
+					currFilePath = msg1->args[0].content;
+					fpsize = msg1->args[0].len;
+					msg1->args[0].content = NULL;
+					msg_destroy(msg1, free, free);
+					msg1 = NULL;
+					void* file_content;
+					size_t file_size;
+					bool modified = false;
+					funcRet = fs_read(server->fs, currFilePath, &file_content, &file_size, *cfd);
+					if (funcRet == 0){
+						send_ret = msend(*cfd, &msg2, M_GETF, NULL, NULL, fpsize, currFilePath, file_size, file_content, sizeof(bool), &modified);
+						free(currFilePath);
+						free(file_content);
+						if (send_ret == -1){
+							if ((errno == EBADMSG) || (errno == EPIPE)) { ...; free(cfd); continue; }; //Spedisci indietro per chiudere
+							else {
+								perror("server_worker: while sending message");
+								free(cfd);
+								return NULL; //FIXME NON SI PUO' FARE QUESTA COSA! SI AVREBBE UNO STATO INCONSISTENTE!
+							}
+						}
+						send_ret = 
+					}
+					break;
+				}
+				case M_READNF: /* fileno */
+				case M_CLOSEF: /* filename */
+				case M_LOCKF: /* filename */
+				case M_UNLOCKF: /* filename */
+				case M_REMOVEF: /* filename */
+				case M_OPENF: /* filename, flags */
+				case M_WRITEF: /* filename, content */
+				case M_APPENDF: /* filename, content */
+				default : { } //Unknown message
+			}
+		}
+		//Controllare ENOTRECOVERABLE
+		//Controllare *cfd < 0
+		errno = errno_copy; //(?)
+	}
+	printf("Worker #%d - exiting\n", wArgs->workerId);
 	return NULL;
 }
 

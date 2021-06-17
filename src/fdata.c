@@ -16,7 +16,7 @@
  * @brief Utility macro for returning after a not recoverable error
  * and unlocking corresponding rwlock.
  */
-#define NOTREC_UNLOCK(fdata, sc, msg) \
+#define FD_NOTREC_UNLOCK(fdata, sc, msg) \
 do { \
 	if ((sc) == -1){ \
 		perror(msg); \
@@ -121,8 +121,7 @@ FileData_t* fdata_create(int maxclient, int creator, bool locking){ /* -> fs_cre
  *	- or the client has not yet opened that file and function fails with file
  *	not opened and lock not acquired.
  * Possible errors are:
- *	- EINVAL: invalid arguments;
- *	- EBADF: file already open.
+ *	- EINVAL: invalid arguments.
  */
 int fdata_open(FileData_t* fdata, int client, bool locking){ /* -> fs_open */
 
@@ -134,12 +133,9 @@ int fdata_open(FileData_t* fdata, int client, bool locking){ /* -> fs_open */
 	
 	CHECK_MAXCLIENT(fdata, client, &ret);
 	
-	if ((ret == 0) && !(fdata->clients[client] & LF_OPEN)){
-		fdata->clients[client] |= LF_OPEN; /* file opened */
+	if (ret == 0){
+		fdata->clients[client] |= LF_OPEN;
 		fdata->clients[client] &= ~LF_WRITE;
-	} else if (ret == 0){  /* file ALREADY open */
-		errno = EBADF;
-		ret = -1;
 	}
 	RWL_UNLOCK(&fdata->lock);
 	/*
@@ -160,11 +156,10 @@ int fdata_open(FileData_t* fdata, int client, bool locking){ /* -> fs_open */
 
 
 /**
- * @brief Closes the current file for client identified by #client param.
+ * @brief Closes the current file for client identified by client param.
  * @return 0 on success, -1 on error.
  * Possible errors are:
- *	- EINVAL: invalid arguments;
- *	- EBADF: file not open.
+ *	- EINVAL: invalid arguments.
  */
 int fdata_close(FileData_t* fdata, int client){ /* -> fs_close */
 	if (client < 0){ errno = EINVAL; return -1; }
@@ -173,12 +168,10 @@ int fdata_close(FileData_t* fdata, int client){ /* -> fs_close */
 	RWL_RDLOCK(&fdata->lock);
 	CHECK_MAXCLIENT(fdata, client, &ret);
 	
-	if ((ret == 0) && (fdata->clients[client] & LF_OPEN)) fdata->clients[client] &= ~LF_OPEN; /* file closed */
-	else if (ret == 0){ /* file NOT open */
-		errno = EBADF;
-		ret = -1;
+	if (ret == 0){
+		fdata->clients[client] &= ~LF_OPEN; /* file closed */
+		fdata->clients[client] &= ~LF_WRITE; /* A writeFile will fail */
 	}
-	if (ret == 0) fdata->clients[client] &= ~LF_WRITE; /* A writeFile will fail */
 	
 	RWL_UNLOCK(&fdata->lock);
 	return ret;
@@ -369,13 +362,13 @@ int fdata_unlock(FileData_t* fdata, int client, llist_t** newowner){
 		fdata->clients[client] &= ~LF_OWNER;
 		int w;
 		/* nonblocking, unrecoverable error (file-lock CANNOT be reassigned) */
-		NOTREC_UNLOCK(fdata, (w = tsqueue_pop(fdata->waiting, &n_own, true)) , "fdata_unlock: while extracting new owner from waiting queue");
+		FD_NOTREC_UNLOCK(fdata, (w = tsqueue_pop(fdata->waiting, &n_own, true)) , "fdata_unlock: while extracting new owner from waiting queue");
 		if (w > 0) fdata->flags &= ~O_LOCK; /* No one is waiting or queue is closed */
 		else if (w == 0){
 			fdata->clients[*n_own] &= ~LF_WAIT;
 			fdata->clients[*n_own] |= LF_OWNER;
 			/* On failure, we could NOT know who is new owner and send it a success message! */
-			NOTREC_UNLOCK(fdata, llist_push(*newowner, n_own), "fdata_unlock: while adding new owner to list");
+			FD_NOTREC_UNLOCK(fdata, llist_push(*newowner, n_own), "fdata_unlock: while adding new owner to list");
 		}
 	} else ret = (ret ? ret : 1); /* Switches to 1 if there has been no error on CHECK_MAXCLIENT */	
 	if (ret == 0) fdata->clients[client] &= ~LF_WRITE; /* A writeFile will fail */	
@@ -402,24 +395,24 @@ int fdata_removeClient(FileData_t* fdata, int client, llist_t** newowner){
 	CHECK_MAXCLIENT(fdata, client, &ret);
 	if (ret == 0) fdata->clients[client] &= ~(LF_OPEN | LF_WRITE); /* These can be safely eliminated here */
 	/*
-	All NOTREC_UNLOCK below are done because an incorrect client-cleanup CANNOT guarantee a future consistent state of what any client
+	All FD_NOTREC_UNLOCK below are done because an incorrect client-cleanup CANNOT guarantee a future consistent state of what any client
 	is doing (i.e., if client id can be recycled after a connection has been closed, there could be an inconsistent state).
 	*/
 	if ((ret == 0) && (fdata->clients[client] & LF_WAIT)){
 		/* On failure, there could be aliasing between disconnected client and a new one */
-		NOTREC_UNLOCK(fdata, tsqueue_iter_init(fdata->waiting), "fdata_removeClient: while initializing iteration on waiting queue");
+		FD_NOTREC_UNLOCK(fdata, tsqueue_iter_init(fdata->waiting), "fdata_removeClient: while initializing iteration on waiting queue");
 		int* r;
 		int res1, res2;
 		while (true){
-			NOTREC_UNLOCK(fdata, (res1 = tsqueue_iter_next(fdata->waiting, &r)), "fdata_removeClient: while iterating on waiting queue");
+			FD_NOTREC_UNLOCK(fdata, (res1 = tsqueue_iter_next(fdata->waiting, &r)), "fdata_removeClient: while iterating on waiting queue");
 			if (res1 == 1) break; /* Iteration ended */
 			if (*r == client){
-				NOTREC_UNLOCK(fdata, (res2 = tsqueue_iter_remove(fdata->waiting, &r)), "fdata_removeClient: while removing waiting client id");
+				FD_NOTREC_UNLOCK(fdata, (res2 = tsqueue_iter_remove(fdata->waiting, &r)), "fdata_removeClient: while removing waiting client id");
 				free(r);
 				break;
 			}
 		}
-		NOTREC_UNLOCK(fdata, tsqueue_iter_end(fdata->waiting), "fdata_removeClient: while ending iteration on waiting queue");
+		FD_NOTREC_UNLOCK(fdata, tsqueue_iter_end(fdata->waiting), "fdata_removeClient: while ending iteration on waiting queue");
 		/* If (res1 == 1), iteration has ended without finding client in the waiting queue */
 		fdata->clients[client] &= ~LF_WAIT;
 		RWL_UNLOCK(&fdata->lock);
@@ -466,7 +459,7 @@ int fdata_destroy(FileData_t* fdata){
 		fdata->data = NULL;	
 	}
 	if (fdata->waiting){
-		NOTREC_UNLOCK(fdata, tsqueue_destroy(fdata->waiting, free), "fdata_destroy: while destroying waiting queue");
+		FD_NOTREC_UNLOCK(fdata, tsqueue_destroy(fdata->waiting, free), "fdata_destroy: while destroying waiting queue");
 		fdata->waiting = NULL;
 	}
 	RWL_UNLOCK(&fdata->lock);

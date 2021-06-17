@@ -78,29 +78,35 @@ do { \
 do {\
 	llistnode_t* node;\
 	char* filename;\
+	char realFilePath[MAXPATHSIZE];\
+	memset(realFilePath, 0, sizeof(realFilePath));\
 	*ret = 0; \
 	llist_foreach(args, node){\
 		filename = (char*)(node->datum);\
-		if (openFile(filename, openFlags) == -1) {\
+		if (realpath(filename, realFilePath) == NULL){\
+			perror("realpath");\
+			break;\
+		}\
+		if (openFile(realFilePath, openFlags) == -1) {\
 			if (errno != EBADE) {\
 				perror("openFile");\
 				*ret = -1;\
 				break;\
 			}\
-		} else if (apiFunc(filename, dirname) == -1) {\
+		} else if (apiFunc(realFilePath, dirname) == -1) {\
 			if (errno != EBADE) {\
 				perror(#apiFunc);\
 				*ret = -1;\
 				break;\
 			}\
-		} else if (closeFile(filename) == -1) {\
+		} else if (closeFile(realFilePath) == -1) {\
 			if (errno != EBADE) {\
 				perror("closeFile");\
 				*ret = -1;\
 				break;\
 			}\
 		} else if (openFlags & O_LOCK){\
-			if (unlockFile(filename) == -1){\
+			if (unlockFile(realFilePath) == -1){\
 				if (errno != EBADE) {\
 					perror("unlockFile");\
 					*ret = -1;\
@@ -141,7 +147,7 @@ const optdef_t options[] = {
 		"name of directory in which to save all (expelled) files received with options -w/-W; for each usage of this option, there MUST be a preceeding \
 -w/-W option, otherwise an error is raised; if this option is not specified at least once, all files received from server will be discarded"},
 
-	{"-r", 1, -1, allPaths, false, "filename[,filename]", "reads from server all files provided in the filename(s) list (if existing)"},
+	{"-r", 1, -1, allAbsPaths, false, "filename[,filename]", "reads from server all files provided in the filename(s) list (if existing)"},
 
 	{"-R", 0, 1, allNumbers, false, "[num]",
 		"reads #num files among those currently in the server; if #num <= 0 or #num > #{files in the server}, then it reads ALL files"},
@@ -152,11 +158,11 @@ otherwise an error is raised; if this option is not specified at least once, all
 
 	{"-t", 1, 1, allNumbers, true, "num", "Delay (in ms) between any subsequent requests to the server; if this option is NOT specified, there will be no delay"}, //TODO Temporarily true
 
-	{"-l", 1, -1, allPaths, false, "filename[,filename]", "list of filenames mutual exclusion (O_LOCK) shall be acquired on"},
+	{"-l", 1, -1, allAbsPaths, false, "filename[,filename]", "list of filenames mutual exclusion (O_LOCK) shall be acquired on"},
 
-	{"-u", 1, -1, allPaths, false, "filename[,filename]", "list of filenames mutual exclusion (O_LOCK) shall be released from"},
+	{"-u", 1, -1, allAbsPaths, false, "filename[,filename]", "list of filenames mutual exclusion (O_LOCK) shall be released from"},
 
-	{"-c", 1, -1, allPaths, false, "filename[,filename]", "list of filenames to be removed from server (if existing)"},
+	{"-c", 1, -1, allAbsPaths, false, "filename[,filename]", "list of filenames to be removed from server (if existing)"},
 
 	{"-p", 0, 0, allNumbers, true, NULL,
 		"Enables printing on stdout all relevant information for each request: operation type, associated file, success/error and read/written bytes (if any)"},
@@ -494,6 +500,7 @@ int main(int argc, char* argv[]){
 	CHECK_COND_DEALLOC_EXIT( (runResult == 0), optvals, "Error while running commands");
 	CHECK_COND_DEALLOC_EXIT( (closeConnection(f_path) == 0), optvals, CLOSECONN_FAILMSG);
 	/* Dealloc and exit but with success */
-	llist_destroy(optvals, optval_destroy);	
+	llist_destroy(optvals, optval_destroy);
+	printf("Client successfully terminated\n");
 	return 0;
 }

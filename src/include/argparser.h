@@ -47,6 +47,7 @@ void optval_destroy(optval_t* opt);
 bool
 	noArgs(llist_t* args), /* No argument is needed for this option */
 	allPaths(llist_t* args), /* All elements in args must be valid path strings */
+	allAbsPaths(llist_t* args), /* All elements in args must be absolute paths strings */
 	allNumbers(llist_t* args), /* All elements in args must be valid numbers without overflow */
 	pathAndNumber(llist_t* args); /* args must contain no more than 2 elements: the first must be a path, the second a number */
 

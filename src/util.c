@@ -22,39 +22,21 @@ bool isUseless(char* input){
 	return res;
 }
 
+bool isPath(char* pathname){ return (pathname ? true : false); }
 
 /**
- * @brief Parses string pathname to check if it is a correct pathname (absolute / relative).
- * In the while loop, assumes to check that each path is of the form [/[^/]*]+, so it
- * adjust the current len counter to consider case of [^/]+[/[^/]*]* as it has the initial
- * '/' and case of [/[^/]*]*[/] as having an empty string after the last '/'.
- * @return true if pathname is a correct UNIX pathname, false otherwise.  
+ * @brief Checks if a path is absolute, i.e. if it starts with '/'.
+ * @note Absolute path does NOT mean existing path.
 */
-bool isPath(char* pathname){
+bool isAbsPath(char* pathname){
 	if (!pathname) return false;
-	size_t clen = 0; /* Current len of parsed tokens (used for checking ONLY '/' between tokens) */
 	size_t n = strlen(pathname);
 	if (n == 0) return false; /* An empty path is not interesting */
-	if (pathname[n-1] == '/') clen++; /* Case of a directory path */
-	if (pathname[0] != '/') clen--; /* Case of a NOT absolute path */
-	char* pathcopy;
-	MALLOC_MSET(pathcopy, n+1, 0);
-	strncpy(pathcopy, pathname, n+1);
-	char* saveptr;
-	char* token;
-	token = strtok_r(pathcopy, "/", &saveptr);
-	while (token){
-		size_t m = strlen(token);
-		clen += m + 1; /* Also '/' */
-		token = strtok_r(NULL, "/", &saveptr);
-	}
-	free(pathcopy);
-	if (clen != n){
-		fprintf(stderr, "Error: uncorrect file/dir path format\n");
-		return false;
-	}
+	if (pathname[n-1] == '/') return false; /* Case of a directory path */
+	if (pathname[0] != '/') return false; /* Case of a NOT absolute path */
 	return true;
 }
+
 
 /** 
  * @brief Converts a string into uppercase for at most

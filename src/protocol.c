@@ -70,8 +70,8 @@ ssize_t getArgn(msg_t type){
 		case M_APPENDF: /* filename, content */
 			return 2;
 
-		case M_GETF:
-			return 3; /* filename, filecontent, modified? */		
+		case M_GETF: /* filename, filecontent, modified? */
+			return 3;		
 	}
 	return -1; /* type is not valid */
 }
@@ -217,7 +217,7 @@ int msg_send(message_t* msg, int fd){
  * that all heap-allocated memory for receiving arguments other than message type and argn would
  * have been freed BEFORE returning, so there could not be memory leaks. 
  * Possible errors are:
- *	- ECONNRESET: EOF was read during a readn, and so the message has not been completely read;
+ *	- EBADMSG: EOF was read during a readn, and so the message has not been completely read;
  *	- ENOMEM: unable to allocate memory to store received content;
  *	-any error by readn.
 */
@@ -227,10 +227,10 @@ int msg_recv(message_t* msg, int fd){
 	/* res == -1 => an error (different from connreset) has occurred; the same applies on the following reads */
 	SYSCALL_RETURN((res = readn(fd, &msg->type, sizeof(msg_t))), -1, "When reading msgtype");
 	/* EOF was read => connection has been closed; the same applies on the following reads */
-	if (res == 0){ errno = ECONNRESET; return 0; }
+	if (res == 0){ errno = EBADMSG; return 0; }
 	
 	SYSCALL_RETURN((res = readn(fd, &msg->argn, sizeof(ssize_t))), -1, "When reading argn");
-	if (res == 0){ errno = ECONNRESET; return 0; }
+	if (res == 0){ errno = EBADMSG; return 0; }
 	
 	msg->args = calloc(msg->argn, sizeof(packet_t));
 	if (!msg->args) return -1; /* ENOMEM */
@@ -238,13 +238,13 @@ int msg_recv(message_t* msg, int fd){
 	
 		res = readn(fd, &msg->args[i].len, sizeof(size_t));
 		if (res <= 0) CLEANUP_RETURN(msg, res, i, "When reading arglen");
-		if (res == 0){ errno = ECONNRESET; return 0; }
+		if (res == 0){ errno = EBADMSG; return 0; }
 		
 		msg->args[i].content = malloc(msg->args[i].len);
 		if (!msg->args[i].content) CLEANUP_RETURN(msg, -1, i, "When allocating memory for next arg");
 		res = readn(fd, msg->args[i].content, msg->args[i].len);
 		if (res <= 0) CLEANUP_RETURN(msg, res, i+1, "When reading arg");
-		if (res == 0){ errno = ECONNRESET; return 0; }
+		if (res == 0){ errno = EBADMSG; return 0; }
 	}
 	return 1;
 }
@@ -321,9 +321,11 @@ int msend(int fd, message_t** msg, msg_t type, char* creatmsg, char* sendmsg, ..
  * @param recvmsg -- An error message to display on error while
  * receiving data into #msg.
  * @return 0 on success, -1 on error.
+ * @note On error, all heap-allocated content is destroyed and
+ * message is NULL.
  * Possible errors are:
  *	- ENOMEM: unable to allocate memory for msg;
- *	- all errors by msg_recv: ECONNRESET and any error by readn.
+ *	- all errors by msg_recv: EBADMSG and any error by readn.
  */
 int mrecv(int fd, message_t** msg, char* creatmsg, char* recvmsg){
 	*msg = msg_init();

@@ -37,6 +37,7 @@ Test cases:
 		Then, three threads try to lock that file and write a string before unlocking.
 */
 
+
 /* Struct for passing arguments to threads */
 struct arg_s {
 	int who;
@@ -57,7 +58,6 @@ void* firstTest(struct arg_s* arg){
 	size_t size;
 	FileStorage_t* fs = ((struct arg_s*)arg)->fs;
 	assert(fs_create(fs, arg->pathname, arg->who, false, &whandler_stub) == 0);
-	assert(fs_open(fs, arg->pathname, arg->who, false) == -1);
 	assert(fs_write(fs, arg->pathname, inbuf, 9, arg->who, false, &whandler_stub, &sbhandler_stub) == 0);
 	assert(fs_write(fs, arg->pathname, inbuf, 9, arg->who, false, &whandler_stub, &sbhandler_stub) == 0);
 	assert(fs_read(fs, arg->pathname, &buf, &size, arg->who) == 0);
@@ -77,7 +77,7 @@ void* secondTest(struct arg_s* arg){
 	assert(fs_create(fs, arg->pathname, arg->who, false, &whandler_stub) == -1);
 	
 	pthread_mutex_lock(&mtx);
-	if (fs_open(fs, arg->pathname, arg->who, false) == -1) perror("fs_open"); /* One will success and the other will give the 'EBADF' error */
+	if (fs_open(fs, arg->pathname, arg->who, false) == -1) perror("fs_open"); /* Both will success */
 	pthread_mutex_unlock(&mtx);
 	
 	assert(fs_write(fs, arg->pathname, inbuf, 9, arg->who, false, &whandler_stub, &sbhandler_stub) == 0);
@@ -101,7 +101,6 @@ void* thirdTest(struct arg_s* arg){
 	size_t size;
 	FileStorage_t* fs = ((struct arg_s*)arg)->fs;
 	assert(fs_create(fs, arg->pathname, arg->who, false, &whandler_stub) == 0);
-	assert(fs_open(fs, arg->pathname, arg->who, false) == -1);
 	assert(fs_write(fs, arg->pathname, inbuf, 135, arg->who, false, &whandler_stub, &sbhandler_stub) == 0);
 	assert(fs_read(fs, arg->pathname, &buf, &size, arg->who) == 0);
 	fs_close(fs, arg->pathname, arg->who);

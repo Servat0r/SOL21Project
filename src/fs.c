@@ -4,7 +4,7 @@
  * @brief Utility macro for when there is an unrecoverable error
  * that needs unlocking before returning.
  */
-#define NOTREC_UNLOCK(fs, sc, msg) \
+#define FS_NOTREC_UNLOCK(fs, sc, msg) \
 do { \
 	if ((sc) == -1){ \
 		perror(msg); \
@@ -14,6 +14,14 @@ do { \
 	} \
 } while(0);
 
+/* Utility macro for freeing resources on failure in fs_create */
+#define	DELRET_FSCREATE(file, pathcopy1, pathcopy2, errmsg)\
+do {\
+	free(pathcopy1);\
+	free(pathcopy2);\
+	SYSCALL_NOTREC(fs, fdata_destroy(file), errmsg);\
+	return -1;\
+} while(0);\
 
 /* ************************ FCONTENT OPERATIONS ********************** */
 
@@ -56,6 +64,7 @@ void fcontent_destroy(fcontent_t* fc){
  * @brief Creates a copy of #pathname for a new entry in the hashtable or 
  * in the replQueue.
  * @return 0 on success, -1 on error.
+ * @note On error, pathcopy and *pathcopy are unmodified.
  * Possible errors are:
  *	- ENOMEM: unable to allocate memory.
  */
@@ -310,7 +319,7 @@ int	fs_resize(FileStorage_t* fs, int newmax){
 	if (fs->maxclient < newmax){
 		icl_hash_foreach(fs->fmap, tmpint, tmpent, filename, file){
 			/* Unavoidable inconsistent state: there could be a client identifier that causes EINVAL on a file and nothing on another */
-			NOTREC_UNLOCK(fs, fdata_resize(file, newmax), "fs_resize: while resizing file's client-array");
+			FS_NOTREC_UNLOCK(fs, fdata_resize(file, newmax), "fs_resize: while resizing file's client-array");
 		}
 		fs->maxclient = newmax;
 	}
@@ -338,12 +347,29 @@ int	fs_create(FileStorage_t* fs, char* pathname, int client, bool locking, int (
 	int ret = 0;
 	FileData_t* file;
 	bool bcreate = false;
-	fs_wop_init(fs);
-	file = fs_search(fs, pathname);
-	if (file){ /* File already existing */
-		fs_op_end(fs);
-		errno = EEXIST;
+	
+	/* Create the file separately from file storage */
+	file = fdata_create(maxclients, client, locking); /* Since this is a new file, it is automatically locked */
+	if (!file){
+		perror("While creating file");
 		return -1;
+	}
+	char* pathcopy1 = NULL;
+	char* pathcopy2 = NULL;
+	/* Copies entries for inserting in hashtable and queue */
+	if (make_entry(pathname, &pathcopy1) == -1){
+		DELRET_FSCREATE(file, pathcopy1, pathcopy2, "fs_create: while destroying file after failure");
+	}
+	if (make_entry(pathname, &pathcopy2) == -1){
+		DELRET_FSCREATE(file, pathcopy1, pathcopy2, "fs_create: while destroying file after failure");
+	}
+	
+	/* Add file to file storage */
+	fs_wop_init(fs);
+	if (fs_search(fs, pathname) != NULL){ /* File already existing */
+		errno = EEXIST;
+		fs_op_end(fs);
+		DELRET_FSCREATE(file, pathcopy1, pathcopy2, "fs_create: while destroying file after failure");
 	} else {
 		bcreate = (fs->fmap->nentries >= fs->maxFileNo);
 		if (bcreate){
@@ -351,57 +377,28 @@ int	fs_create(FileStorage_t* fs, char* pathname, int client, bool locking, int (
 			if (repl != 0){ /* Error while expelling files */
 				if (repl == -1) perror("While updating cache");
 				fs_op_end(fs);
-				return -1;
+				DELRET_FSCREATE(file, pathcopy1, pathcopy2, "fs_create: while destroying file after failure");
 			} else fs->replCount++; /* Cache replacement has been correctly executed */
 		} /* We don't need to repeat the search here */
-		file = fdata_create(maxclients, client, locking); /* Since this is a new file, it is automatically locked */
-		if (!file){
-			perror("While creating file");
-			fs_op_end(fs);
-			return -1;
-		}
 	}
-	char* pathcopy1;
-	char* pathcopy2;
-	/* Copies entries for inserting in hashtable and queue */
-	if (make_entry(pathname, &pathcopy1) == -1){
-		NOTREC_UNLOCK(fs, fdata_destroy(file), "fs_create: while destroying file after failure"); /* No one is waiting now */
+	/* Inserts new mapping in the hash table */
+	icl_entry_t* fent = icl_hash_insert(fs->fmap, pathcopy1, file);
+	if (!fent){
 		fs_op_end(fs);
-		return -1;
-	}
-	if (make_entry(pathname, &pathcopy2) == -1){
-		free(pathcopy1);
-		NOTREC_UNLOCK(fs, fdata_destroy(file), "fs_create: while destroying file after failure"); /* No one is waiting now */
-		fs_op_end(fs);
-		return -1;
+		DELRET_FSCREATE(file, pathcopy1, pathcopy2, "fs_create: while destroying file after failure");
 	}
 	/* Inserts new file in the replQueue */
 	if (tsqueue_push(fs->replQueue, pathcopy2) == -1){
-		free(pathcopy1);
-		free(pathcopy2);
-		NOTREC_UNLOCK(fs, fdata_destroy(file), "fs_create: while destroying file after failure");
+		fent->data = NULL; /* No operation performed by free */
+		FS_NOTREC_UNLOCK(fs, icl_hash_delete(fs->fmap, pathcopy1, free, free), "fs_create: while destroying filename in hashtable" );
+		pathcopy1 = NULL; /* No operation performed by free */
 		fs_op_end(fs);
-		return -1;
-	}
-	/* Inserts new mapping in the hash table */
-	if (icl_hash_insert(fs->fmap, pathcopy1, file) == -1){
-		free(pathcopy1);
-		NOTREC_UNLOCK(fs, fdata_destroy(file), "fs_create: while destroying file after failure");
-		 /* "Phantom" filename in queue */
-		if (tsqueue_pop(fs->replQueue, &pathcopy2, true) != 0){
-			free(pathcopy2);
-			errno = ENOTRECOVERABLE;
-			fs_op_end(fs);
-			return -1;
-		}
-		free(pathcopy2);
-		fs_op_end(fs);
-		return -1;
+		DELRET_FSCREATE(file, pathcopy1, pathcopy2, "fs_create: while destroying file after failure");
 	}
 	/* Updates statistics */
-	if (bcreate) fs->maxFileHosted = MAX(fs->maxFileHosted, fs->fmap->nentries);
+	fs->maxFileHosted = MAX(fs->maxFileHosted, fs->fmap->nentries);
 	fs_op_end(fs);
-	return ret;
+	return 0;
 }
 
 
@@ -688,20 +685,20 @@ int fs_remove(FileStorage_t* fs, char* pathname, int client, int (*waitHandler)(
 		}
 		waitHandler(waitQueue);
 		/* Unavoidable memory leak */
-		NOTREC_UNLOCK(fs, tsqueue_destroy(waitQueue, free), "fs_remove: while destroying waiting queue");
+		FS_NOTREC_UNLOCK(fs, tsqueue_destroy(waitQueue, free), "fs_remove: while destroying waiting queue");
 		/* "Phantom" file */
-		NOTREC_UNLOCK(fs, fs_trash(fs, file, pathname), "fs_remove: while destroying file"); /* Updates spaceSize automatically */
+		FS_NOTREC_UNLOCK(fs, fs_trash(fs, file, pathname), "fs_remove: while destroying file"); /* Updates spaceSize automatically */
 		char* pathcopy;
 		int res1, res2;
 		/* Removes filename from the replacement queue: failure here means possible aliasing with future files */
-		NOTREC_UNLOCK(fs, tsqueue_iter_init(fs->replQueue), "fs_remove: while initializing iteration on replacement queue\n");
+		FS_NOTREC_UNLOCK(fs, tsqueue_iter_init(fs->replQueue), "fs_remove: while initializing iteration on replacement queue\n");
 		while (true){
-			NOTREC_UNLOCK(fs, (res1 = tsqueue_iter_next(fs->replQueue, &pathcopy)), "fs_remove: while iterating on replacement queue\n");
+			FS_NOTREC_UNLOCK(fs, (res1 = tsqueue_iter_next(fs->replQueue, &pathcopy)), "fs_remove: while iterating on replacement queue\n");
 			if (res1 != 0) break;
 			if (!pathcopy) continue;
 			if ( strequal(pathname, pathcopy) ){
 				if ((res2 = tsqueue_iter_remove(fs->replQueue, &pathcopy)) == -1){ /* queue is untouched */
-					NOTREC_UNLOCK(fs, tsqueue_iter_end(fs->replQueue), "fs_remove: while terminating iteration on queue");
+					FS_NOTREC_UNLOCK(fs, tsqueue_iter_end(fs->replQueue), "fs_remove: while terminating iteration on queue");
 					errno = ENOTRECOVERABLE; /* "Phantom" filename in replacement queue */
 					fs_op_end(fs);
 					return -1;
@@ -709,7 +706,7 @@ int fs_remove(FileStorage_t* fs, char* pathname, int client, int (*waitHandler)(
 				break;
 			}
 		}
-		NOTREC_UNLOCK(fs, tsqueue_iter_end(fs->replQueue), "fs_remove: while ending iteration on waiting queue");
+		FS_NOTREC_UNLOCK(fs, tsqueue_iter_end(fs->replQueue), "fs_remove: while ending iteration on waiting queue");
 	} else ret = 1;
 	fs_op_end(fs);
 	return ret;
@@ -733,7 +730,7 @@ int	fs_clientCleanup(FileStorage_t* fs, int client, llist_t** newowners_list){
 	fs_wop_init(fs); /* Here there will NOT be any other using any file */
 	icl_hash_foreach(fs->fmap, tmpint, tmpent, filename, file){
 		/* If we don't get to remove all client metadata, there will be an inconsistent state in file */
-		NOTREC_UNLOCK(fs, fdata_removeClient(file, client, newowners_list),
+		FS_NOTREC_UNLOCK(fs, fdata_removeClient(file, client, newowners_list),
 			"fs_clientCleanup: while removing client metadata\n");
 	}
 	fs->cleanupCount++; /* Cleanup has been correctly executed */

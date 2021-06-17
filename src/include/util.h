@@ -23,6 +23,7 @@
 bool 
 	isUseless(char*),
 	isPath(char*),
+	isAbsPath(char*),
 	strtoupper(char*, const char*, size_t),
 	strequal(char*, char*),
 	isNumber(char* str),
