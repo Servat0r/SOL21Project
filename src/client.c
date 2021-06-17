@@ -230,7 +230,6 @@ int check_rwConsistency(llist_t* optvals){
 	bool foundWw = false; /* true <=> current option is in {-W, -w}; set to false on next option scanning */
 	llistnode_t* node;
 	optdef_t* def;
-	size_t n;
 	llist_foreach(optvals, node){
 		def = ((optval_t*)node->datum)->def;
 		if (strequal(def->name, "-d")){ /* This -d is NOT preceeded by a -r/-R */
@@ -278,8 +277,6 @@ int w_handler(optval_t* wopt, char* dirname){
 		if (getInt(wopt->args->tail->datum, &n) != 0) return -1;
 	}
 	llist_t* filelist;
-	llistnode_t* node;
-	char* filename;
 	char* nomedir = (char*)(wopt->args->head->datum);
 	int ret = 0;
 	/* On success, filelist shall contain HEAP-allocated ABSOLUTE paths. */

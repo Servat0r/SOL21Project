@@ -602,11 +602,11 @@ int fs_lock(FileStorage_t* fs, char* pathname, int client){
  * @brief Resets the O_LOCK flag to the file identified by pathname. This
  * operation completes successfully iff client is the current owner of the
  * O_LOCK flag.
- * @return 0 on success, -1 on error, 1 if O_LOCK is not set or LF_OWNER
- * is not set for #client (i.e., calling client CANNOT unlock file).
+ * @return 0 on success, -1 on error.
  * Possible errors are:
  *	- EINVAL: invalid arguments;
  *	- ENOENT: the file does not exist;
+ *	- EPERM: calling client CANNOT unlock file;
  *	- any error by fdata_unlock and fs_search.
  */
 int fs_unlock(FileStorage_t* fs, char* pathname, int client, llist_t** newowner){
@@ -622,6 +622,7 @@ int fs_unlock(FileStorage_t* fs, char* pathname, int client, llist_t** newowner)
 	}
 	res = fdata_unlock(file, client, newowner); //FIXME La fdata_unlock NON si completa!
 	fs_op_end(fs);
+	if (res == 1){ errno = EPERM; res = -1; }
 	return res;
 }
 

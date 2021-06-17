@@ -15,7 +15,7 @@
 #	- FileStorageBuckets > 0.
 
 
-# Path of the server socket
+# Path of the server socket (eventualmente togliere tmp)
 SocketPath = bin/tmp/serverSocket.sk 
 
 

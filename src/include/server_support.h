@@ -8,6 +8,8 @@
 #include <util.h>
 #include <linkedlist.h>
 
+/* WORKERS POOL MANAGER */
+
 /**
  * @brief Workers pool data structure.
  */
@@ -27,5 +29,8 @@ int
 	wpool_joinAll(wpool_t*),
 	wpool_retval(wpool_t*, int, void**),
 	wpool_destroy(wpool_t*);
+
+/* WORKERS POOL MANAGER */
+
 
 #endif /* _SERVER_SUPPORT_H */
