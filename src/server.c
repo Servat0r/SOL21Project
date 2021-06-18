@@ -56,12 +56,9 @@ do {\
 /* Closes listen socket and pipe (if open) */
 #define CLOSE_CHANNELS(server)\
 do {\
-	if (server->pfd[0] >= 0) close(server->pfd[0]);\
-	if (server->pfd[1] >= 0) close(server->pfd[1]);\
-	if (server->sockfd >= 0) close(server->sockfd);\
-	server->pfd[0] = -1;\
-	server->pfd[1] = -1;\
-	server->sockfd = -1;\
+	if (server->pfd[0] >= 0){ close(server->pfd[0]); server->pfd[0] = -1; }\
+	if (server->pfd[1] >= 0){ close(server->pfd[1]); server->pfd[1] = -1; }\
+	if (server->sockfd >= 0){ close(server->sockfd); server->sockfd = -1; }\
 } while(0);
 
 
@@ -151,9 +148,11 @@ do {\
 			FD_CLR(cfd, &server->saveset);\
 			i++;\
 		}\
+		cfd++;\
 	}\
 	server->nactives = 0;\
 } while(0);
+
 
 /* Removes a client fd from listen sets */
 #define UNLISTEN(server, cfd)\
@@ -163,6 +162,7 @@ do {\
 	FD_CLR(cfd, &server->saveset);\
 	UPDATE_MAXLISTEN(server);\
 } while(0);
+
 
 /* "Re-adds" client to listen sets */
 #define RELISTEN(server, cfd)\
@@ -183,22 +183,23 @@ do {\
 	free(cfd);\
 } while(0);
 
+
 /* Checks if errno is set to a fatal error and if yes, exits */
-#define CHECK_FATAL_EXIT \
+#define CHECK_FATAL_EXIT(server) \
 do {\
 	if ((errno == ENOTRECOVERABLE) || (errno == ENOMEM)) exit(EXIT_FAILURE);\
 } while(0);
 
 
 /* Handles result of a msend to client */
-#define HANDLE_SEND_RET(server, send_ret, cfd) \
+#define HANDLE_SEND_RET(server, send_ret, fd)\
 do {\
 	if (send_ret == -1){\
 		if ((errno == EPIPE) || (errno == EBADMSG)){\
-			*cfd = fd_switch(*cfd);\
+			*fd = fd_switch(*fd);\
 		} else {\
-			perror(#msend);\
-			free(cfd);\
+			perror("Error while sending message to client");\
+			free(fd);\
 			exit(EXIT_FAILURE);\
 		}\
 	}\
@@ -221,7 +222,7 @@ do {\
 	int send_ret = 0;\
 	message_t* msg;\
 	int result = (req);\
-	CHECK_FATAL_EXIT; /* Checks non-recoverable errors */\
+	CHECK_FATAL_EXIT(server); /* Checks non-recoverable errors */\
 	/* Handles message sending */\
 	if (result == 0){\
 		send_ret = msend(*cfd, &msg, M_OK, NULL, NULL);\
@@ -254,13 +255,13 @@ do {\
 	int send_ret = 0;\
 	message_t* msg;\
 	int result = fs_read(server->fs, filename, buf, size, *cfd);\
-	CHECK_FATAL_EXIT; /* Checks non-recoverable errors */\
+	CHECK_FATAL_EXIT(server); /* Checks non-recoverable errors */\
 	/* Handles message sending */\
 	if (result == 0){\
 		bool modified = false;\
 		send_ret = msend(*cfd, &msg, M_GETF, NULL, NULL, strlen(filename)+1, filename, *size, *buf, sizeof(bool), &modified);\
 		free(*buf);\
-		HANDLE_SEND_RET(server, send_ret, cfd); /* "Embedded" CHECK_FATAL_EXIT */\
+		HANDLE_SEND_RET(server, send_ret, cfd); /* "Embedded" CHECK_FATAL_EXIT(server) */\
 		if (send_ret == 0){\
 			send_ret = msend(*cfd, &msg, M_OK, NULL, NULL);\
 			HANDLE_SEND_RET(server, send_ret, cfd);\
@@ -296,7 +297,7 @@ do {\
 	size_t filesize;\
 	fcontent_t* file;\
 	int res = fs_readN(server->fs, *cfd, N, results);\
-	CHECK_FATAL_EXIT; /* Checks non-recoverable errors */\
+	CHECK_FATAL_EXIT(server); /* Checks non-recoverable errors */\
 	/* Handles message sending */\
 	if (res == 0){\
 		bool modified = false;\
@@ -306,7 +307,7 @@ do {\
 			filesize = file->size;\
 			filecontent = file->content;\
 			send_ret = msend(*cfd, &msg, M_GETF, NULL, NULL, strlen(filename)+1, filename, filesize, filecontent, sizeof(bool), &modified);\
-			HANDLE_SEND_RET(server, send_ret, cfd); /* "Embedded" CHECK_FATAL_EXIT */\
+			HANDLE_SEND_RET(server, send_ret, cfd); /* "Embedded" CHECK_FATAL_EXIT(server) */\
 			if (send_ret == -1){ FD_SENDBACK(server, cfd); break; } /* Connection closed */\
 		}\
 		SYSCALL_EXIT(llist_destroy(*results, fcontent_destroy), "llist_destroy");\
@@ -638,9 +639,9 @@ void* server_worker(wArgs_t* wArgs){
 		recv_ret = mrecv(*cfd, &msg, NULL, NULL);
 		if (recv_ret == -1){ //msg == NULL
 			if (errno == EBADMSG){ /* connection closed */
-				*cfd = fd_switch(*cfd);
 				/* Handles cleanup */
 				SYSCALL_EXIT( server_cleanup_handler(server, *cfd, &newowners) , "server_worker: while handling client cleanup");
+				*cfd = fd_switch(*cfd);
 				SYSCALL_EXIT( write(server->pfd[1], cfd, sizeof(int)) , "server_worker: while sending back fd");
 				free(cfd);
 				continue;
@@ -756,6 +757,7 @@ void* server_worker(wArgs_t* wArgs){
 		}
 	} /* end of while loop */
 	printf("Worker #%d - exiting\n", wArgs->workerId);
+	SYSCALL_EXIT(llist_destroy(newowners, free), "Worker #%d - while destroying newowners queue\n");
 	return NULL;
 }
 
@@ -780,6 +782,10 @@ int server_start(server_t* server, wArgs_t** wArgs){
 	CLS_CHAN_RETURN( server, bind(server->sockfd, (const struct sockaddr*)(&server->sa), UNIX_PATH_MAX), "server_start: bind");
 	CLS_CHAN_RETURN( server, listen(server->sockfd, server->sockBacklog), "server_start: listen");
 	CLS_CHAN_RETURN( server, wpool_runAll(server->wpool, &server_worker, (void**)wArgs), "server_start: wpool_runAll");
+	FD_SET(server->sockfd, &server->saveset);
+	FD_SET(server->pfd[0], &server->saveset);
+	FD_SET(server->sockfd, &server->rdset);
+	FD_SET(server->pfd[0], &server->rdset);
 	server->maxlisten = MAX(server->sockfd, server->pfd[0]); /* We are now listening these two */
 	return 0;
 }
