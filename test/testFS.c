@@ -47,7 +47,7 @@ struct arg_s {
 };
 
 
-int whandler_stub(tsqueue_t* waitQueue){ return 0; }
+int whandler_stub(int chan, tsqueue_t* waitQueue){ return 0; }
 
 int sbhandler_stub(void* content, size_t size, int cfd, bool modified){ return 0; }
 
@@ -57,9 +57,9 @@ void* firstTest(struct arg_s* arg){
 	char* buf;
 	size_t size;
 	FileStorage_t* fs = ((struct arg_s*)arg)->fs;
-	assert(fs_create(fs, arg->pathname, arg->who, false, &whandler_stub) == 0);
-	assert(fs_write(fs, arg->pathname, inbuf, 9, arg->who, false, &whandler_stub, &sbhandler_stub) == 0);
-	assert(fs_write(fs, arg->pathname, inbuf, 9, arg->who, false, &whandler_stub, &sbhandler_stub) == 0);
+	assert(fs_create(fs, arg->pathname, arg->who, false, &whandler_stub, 0) == 0);
+	assert(fs_write(fs, arg->pathname, inbuf, 9, arg->who, false, &whandler_stub, &sbhandler_stub, 0) == 0);
+	assert(fs_write(fs, arg->pathname, inbuf, 9, arg->who, false, &whandler_stub, &sbhandler_stub, 0) == 0);
 	assert(fs_read(fs, arg->pathname, &buf, &size, arg->who) == 0);
 	assert(fs_close(fs, arg->pathname, arg->who) == 0);
 	if (write(1, buf, size) == -1) perror("write");
@@ -74,13 +74,13 @@ void* secondTest(struct arg_s* arg){
 	char* buf;
 	size_t size;
 	FileStorage_t* fs = ((struct arg_s*)arg)->fs;
-	assert(fs_create(fs, arg->pathname, arg->who, false, &whandler_stub) == -1);
+	assert(fs_create(fs, arg->pathname, arg->who, false, &whandler_stub, 0) == -1);
 	
 	pthread_mutex_lock(&mtx);
 	if (fs_open(fs, arg->pathname, arg->who, false) == -1) perror("fs_open"); /* Both will success */
 	pthread_mutex_unlock(&mtx);
 	
-	assert(fs_write(fs, arg->pathname, inbuf, 9, arg->who, false, &whandler_stub, &sbhandler_stub) == 0);
+	assert(fs_write(fs, arg->pathname, inbuf, 9, arg->who, false, &whandler_stub, &sbhandler_stub, 0) == 0);
 	assert(fs_read(fs, arg->pathname, &buf, &size, arg->who) == 0);
 
 	pthread_mutex_lock(&mtx);
@@ -100,8 +100,8 @@ void* thirdTest(struct arg_s* arg){
 	char* buf;
 	size_t size;
 	FileStorage_t* fs = ((struct arg_s*)arg)->fs;
-	assert(fs_create(fs, arg->pathname, arg->who, false, &whandler_stub) == 0);
-	assert(fs_write(fs, arg->pathname, inbuf, 135, arg->who, false, &whandler_stub, &sbhandler_stub) == 0);
+	assert(fs_create(fs, arg->pathname, arg->who, false, &whandler_stub, 0) == 0);
+	assert(fs_write(fs, arg->pathname, inbuf, 135, arg->who, false, &whandler_stub, &sbhandler_stub, 0) == 0);
 	assert(fs_read(fs, arg->pathname, &buf, &size, arg->who) == 0);
 	fs_close(fs, arg->pathname, arg->who);
 	free(buf);
@@ -112,7 +112,7 @@ void* thirdTest(struct arg_s* arg){
 /** @brief Fourth testcase thread function */
 void* fourthTest(struct arg_s* arg){
 	FileStorage_t* fs = ((struct arg_s*)arg)->fs;
-	assert(fs_create(fs, arg->pathname, arg->who, false, &whandler_stub) == 0);
+	assert(fs_create(fs, arg->pathname, arg->who, false, &whandler_stub, 0) == 0);
 	printf("fs_create successfully completed by arg->who == %d\n", arg->who);
 	assert(fs_close(fs, arg->pathname, arg->who) == 0);
 	printf("arg->who == %d exiting...\n\n", arg->who);
@@ -147,10 +147,10 @@ void* sixthTest_createwrite(struct arg_s* arg){
 	char* filename = (char*)(arg->pathname);
 	llist_t* newowner;
 	assert((newowner = llist_init()));
-	assert(fs_create(fs, filename, 0, true, &whandler_stub) == 0); /* File is locked */
-	assert(fs_write(fs, filename, STR2, 82, 0, true, &whandler_stub, &sbhandler_stub) == 0); /* Write content */
+	assert(fs_create(fs, filename, 0, true, &whandler_stub, 0) == 0); /* File is locked */
+	assert(fs_write(fs, filename, STR2, 82, 0, true, &whandler_stub, &sbhandler_stub, 0) == 0); /* Write content */
 	assert(fs_unlock(fs, filename, 0, &newowner) == 0);
-	//assert(fs_remove(fs, filename, 0, &whandler_stub) == -1);
+	//assert(fs_remove(fs, filename, 0, &whandler_stub, 0) == -1);
 	printf("newowner_size = %d\n", newowner->size);
 	if (newowner->size > 0) printf("newowner_clientId = %d\n", *((int*)newowner->head->datum));
 	assert(fs_close(fs, filename, 0) == 0);
@@ -180,7 +180,7 @@ void* sixthTest_locking(struct arg_s* arg){
 	}
 	pthread_mutex_unlock(&mtx);
 
-	assert(fs_write(fs, filename, "@A@", 3, id, false, &whandler_stub, &sbhandler_stub) == 0);
+	assert(fs_write(fs, filename, "@A@", 3, id, false, &whandler_stub, &sbhandler_stub, 0) == 0);
 	assert(fs_close(fs, filename, id) == 0);
 	llistnode_t* node;
 	int* datum;

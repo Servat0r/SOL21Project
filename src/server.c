@@ -181,6 +181,7 @@ do {\
 do {\
 	SYSCALL_EXIT(write(server->pfd[1], cfd, sizeof(*cfd)), "server_worker: while sending back client fd");\
 	free(cfd);\
+	cfd = NULL;\
 } while(0);
 
 
@@ -195,8 +196,8 @@ do {\
 #define HANDLE_SEND_RET(server, send_ret, fd)\
 do {\
 	if (send_ret == -1){\
-		if ((errno == EPIPE) || (errno == EBADMSG)){\
-			*fd = fd_switch(*fd);\
+		if ((errno == EPIPE) || (errno == EBADMSG)){ /* Connection closed */\
+			fd_switch(fd);\
 		} else {\
 			perror("Error while sending message to client");\
 			free(fd);\
@@ -214,7 +215,7 @@ do {\
  * @param req -- Code of function request (e.g. fs_open(...));
  * @param fname -- Name of function;
  * @param cfd -- Pointer to client fd;
- * @param errmsg -- Error message for perror.
+ * @param errmsg -- Error message for perror;
  */
 #define SIMPLE_REQ_HANDLER(server, req, fname, cfd, errmsg)\
 do {\
@@ -236,7 +237,7 @@ do {\
 	}\
 	/* Checks return value for msend */\
 	HANDLE_SEND_RET(server, send_ret, cfd);\
-	FD_SENDBACK(server, cfd);\
+	if (*cfd > 0) FD_SENDBACK(server, cfd);\
 } while(0);
 
 
@@ -266,17 +267,16 @@ do {\
 			send_ret = msend(*cfd, &msg, M_OK, NULL, NULL);\
 			HANDLE_SEND_RET(server, send_ret, cfd);\
 		}\
-		FD_SENDBACK(server, cfd);\
+		if (*cfd > 0) FD_SENDBACK(server, cfd);\
 	} else if (result == -1){\
 		perror(errmsg);\
 		error = errno;\
 		send_ret = msend(*cfd, &msg, M_ERR, NULL, NULL, sizeof(error), &error);\
 		HANDLE_SEND_RET(server, send_ret, cfd);\
-		FD_SENDBACK(server, cfd);\
+		if (*cfd > 0) FD_SENDBACK(server, cfd);\
 	} else free(cfd); /* 1 because of waiting (open, lock) */\
 } while(0);
 
-//TODO L'idea è che è il worker a liberare i parametri del messaggio ricevuto alla fine.
 /**
  * Handles a readNFiles request, i.e. M_READNF.
  * @param N -- #{files} to read according to readNFiles specification;
@@ -308,21 +308,24 @@ do {\
 			filecontent = file->content;\
 			send_ret = msend(*cfd, &msg, M_GETF, NULL, NULL, strlen(filename)+1, filename, filesize, filecontent, sizeof(bool), &modified);\
 			HANDLE_SEND_RET(server, send_ret, cfd); /* "Embedded" CHECK_FATAL_EXIT(server) */\
-			if (send_ret == -1){ FD_SENDBACK(server, cfd); break; } /* Connection closed */\
+			if (send_ret == -1){\
+				if (*cfd > 0) { FD_SENDBACK(server, cfd); }\
+				break;\
+			} /* Connection closed */\
 		}\
 		SYSCALL_EXIT(llist_destroy(*results, fcontent_destroy), "llist_destroy");\
 		if (send_ret == 0){ /* Connection still open, cfd NOT freed and > 0 */\
 			send_ret = msend(*cfd, &msg, M_OK, NULL, NULL);\
 			HANDLE_SEND_RET(server, send_ret, cfd);\
 		}\
-		FD_SENDBACK(server, cfd);\
+		if (*cfd > 0) FD_SENDBACK(server, cfd);\
 	} else if (res == -1){\
 		perror(errmsg);\
 		error = errno;\
 		SYSCALL_EXIT(llist_destroy(*results, fcontent_destroy), "llist_destroy");\
 		send_ret = msend(*cfd, &msg, M_ERR, NULL, NULL, sizeof(error), &error);\
 		HANDLE_SEND_RET(server, send_ret, cfd);\
-		FD_SENDBACK(server, cfd);\
+		if (*cfd > 0) FD_SENDBACK(server, cfd);\
 	}\
 } while(0);
 
@@ -397,10 +400,11 @@ typedef struct server_s {
 typedef struct wArgs_s {
 	server_t* server;
 	int workerId; /* Identifier [1, #workers] */
+	//TODO Aggiungere campi statistici (richieste ricevute e completate con successo ...)
 } wArgs_t;
 
 /* File descriptor "switching" function */
-static int fd_switch(int fd){ return -fd-1; }
+static int fd_switch(int* fd){ *fd = -(*fd)-1; }
 
 /**
  * @brief WaitHandler (as described for FileStorage_t)
@@ -409,7 +413,7 @@ static int fd_switch(int fd){ return -fd-1; }
  * @return 0 on success, -1 on error.
  * @note On error, waitQueue is unmodified.
  */
-int server_wHandler(tsqueue_t* waitQueue){
+int server_wHandler(int chan, tsqueue_t* waitQueue){
 	if (!waitQueue) return -1;
 	int res1 = 0;
 	int* cfd;
@@ -420,8 +424,9 @@ int server_wHandler(tsqueue_t* waitQueue){
 		SYSCALL_NOTREC( (res1 = tsqueue_iter_next(waitQueue, &cfd)), -1, "server_wHandler: while iterating");
 		if (res1 != 0) break; /* Iteration ended */
 		if (!cfd) continue; /* NULL pointer in queue */
-		SYSCALL_NOTREC( msend(*cfd, &msg, M_ERR, "server_wHandler: while creating message to send", "server_wHandler: while sending message",
-			sizeof(error), &error), -1, "server_wHandler: while sending back failure message");
+		SYSCALL_NOTREC( msend(*cfd, &msg, M_ERR, NULL, NULL,sizeof(error), &error), 
+			-1, "server_wHandler: while sending back failure message");
+		SYSCALL_NOTREC(write(chan, cfd, sizeof(*cfd)) , -1, "server_wHandler: while sending back client fd");
 	}
 	SYSCALL_NOTREC(tsqueue_iter_end(waitQueue), -1, "server_wHandler: while ending iteration");
 	return 0;
@@ -438,29 +443,29 @@ int server_wHandler(tsqueue_t* waitQueue){
 int server_sbHandler(char* pathname, void* content, size_t size, int cfd, bool modified){
 	if (!pathname || !content || (cfd < 0)) return -1;
 	message_t* msg;
-	SYSCALL_NOTREC( msend(cfd, &msg, M_GETF, "server_sbHandler: while creating message to send", "server_sbHandler: while sending message",
-		strlen(pathname)+1, pathname, size, content, sizeof(bool), &modified), -1, "server_sbHandler: while sending back file");
+	SYSCALL_NOTREC( msend(cfd, &msg, M_GETF, NULL, NULL, strlen(pathname)+1, pathname, 
+		size, content, sizeof(bool), &modified), -1, "server_sbHandler: while sending back file");
 	return 0;
 }
 
 
 /* Calls fs_clientCleanup */
-int server_cleanup_handler(server_t* server, int cfd, llist_t** newowners){
+int server_cleanup_handler(server_t* server, int* cfd, llist_t** newowners){
 	int send_ret;
 	message_t* msg;
 	int* nextfd;
 	int popret = 0;
-	SYSCALL_EXIT(fs_clientCleanup(server->fs, cfd, newowners), "fs_clientCleanup");
+	if (*cfd < 0) fd_switch(cfd);
+	SYSCALL_EXIT(fs_clientCleanup(server->fs, *cfd, newowners), "fs_clientCleanup");
+	fd_switch(cfd); /* => < 0*/
+	FD_SENDBACK(server, cfd); /* Closed connection (sent back to server) */
 	while (true){
 		SYSCALL_RETURN( (popret = llist_pop(*newowners, &nextfd)), -1, "cleanup_handler: while getting next lock owner");
 		if (popret == 1) break;
 		send_ret = msend(*nextfd, &msg, M_OK, NULL, NULL);
 		HANDLE_SEND_RET(server, send_ret, nextfd);
-		if (send_ret == -1){ /* Connection closed */
-			if (*nextfd < 0) *nextfd = fd_switch(*nextfd);
-			SYSCALL_EXIT(server_cleanup_handler(server, *nextfd, newowners), "server_cleanup_handler");
-		}
-		FD_SENDBACK(server, nextfd);
+		if (*nextfd < 0) { SYSCALL_EXIT(server_cleanup_handler(server, nextfd, newowners), "server_cleanup_handler"); }/* Connection closed */
+		else { FD_SENDBACK(server, nextfd); }/* Connection still open */
 	}
 	return 0;
 }
@@ -543,7 +548,7 @@ int server_manager(server_t* server){
 	int* nfd = NULL;
 	int cfd = 0;
 	int dispatched = 0;
-	printf("Thread manager (0)\n"); //TODO L'identificatore del thread manager è 0
+	printf("Thread manager - start\n");
 	while (true){
 		
 		/* Mainloop 0 - Handle S_CLOSED server termination and reset readback array */
@@ -559,7 +564,7 @@ int server_manager(server_t* server){
 			if (errno == EINTR){ /* Signal caught or other interrupt */
 				if (serverState != S_OPEN){
 					printf("Termination signal caught\n");
-					CLOSE_LSOCKET(server); //TODO Scrivere!
+					CLOSE_LSOCKET(server);
 				} /* No more connections (data in server->rdset are NOT valid!) */
 				if (serverState == S_CLOSED) continue;
 				if (serverState == S_SHUTDOWN){
@@ -602,7 +607,7 @@ int server_manager(server_t* server){
 			for (ssize_t j = 0; j < nums; j++){
 				rfd = server->readback[j];
 				if (rfd < 0){ /* A file has been closed */
-					rfd = fd_switch(rfd);
+					fd_switch(&rfd);
 					printf("Connection #%d closed by client\n", rfd);
 					CLOSE_CLCONN(server, rfd); /* Client has closed connection */
 				} else { RELISTEN(server, rfd); } /* Now can be listened again */
@@ -610,17 +615,17 @@ int server_manager(server_t* server){
 		}
 	} /* end of while loop */
 	tsqueue_close(server->connQueue); /* Unblocks all workers */
-	printf("Manager - exiting\n");
+	printf("Thread manager - exiting\n");
 	return 0;
 }
 
 
 /**
  * @brief Worker function.
- * @return NULL.
+ * @return (void*)0 on success, (void*)1 on error.
  */
 void* server_worker(wArgs_t* wArgs){
-	printf("Thread worker (%d)\n", wArgs->workerId);
+	printf("Thread worker #%d - start\n", wArgs->workerId);
 	server_t* server = wArgs->server;
 	int qret = 0;
 	int* cfd;
@@ -630,7 +635,10 @@ void* server_worker(wArgs_t* wArgs){
 	int recv_ret, send_ret;
 	int popret;
 	llist_t* newowners = llist_init(); /* For new lock owners unlocked during client cleanup */
-	if (!newowners) return NULL;
+	if (!newowners){
+		printf("Thread worker #%d - exiting\n", wArgs->workerId);
+		return (void*)1;
+	}
 	while (true){
 		currFilePath = NULL;
 		fpsize = 0;
@@ -641,13 +649,13 @@ void* server_worker(wArgs_t* wArgs){
 			if (errno == EBADMSG){ /* connection closed */
 				/* Handles cleanup */
 				SYSCALL_EXIT( server_cleanup_handler(server, *cfd, &newowners) , "server_worker: while handling client cleanup");
-				*cfd = fd_switch(*cfd);
-				SYSCALL_EXIT( write(server->pfd[1], cfd, sizeof(int)) , "server_worker: while sending back fd");
-				free(cfd);
+				fd_switch(cfd); /* < 0 */
+				FD_SENDBACK(server, cfd);
 				continue;
 			} else {
 				perror("server_worker: while getting message");
 				free(cfd);
+				cfd = NULL;
 				break; /* Exits mainloop */
 			}
 		}
@@ -705,7 +713,7 @@ void* server_worker(wArgs_t* wArgs){
 			case M_REMOVEF: { /* filename */
 				currFilePath = msg->args[0].content;
 				fpsize = msg->args[0].len;
-				SIMPLE_REQ_HANDLER(server, fs_remove(server->fs, currFilePath, *cfd, &server_wHandler),
+				SIMPLE_REQ_HANDLER(server, fs_remove(server->fs, currFilePath, *cfd, &server_wHandler, server->pfd[1]),
 					fs_remove, cfd, "error while handling request");
 				break;
 			}
@@ -716,10 +724,10 @@ void* server_worker(wArgs_t* wArgs){
 				int* flags = msg->args[1].content;
 				bool locking = (*flags & O_LOCK);
 				if (*flags & O_CREATE){
-					SIMPLE_REQ_HANDLER(server, fs_create(server->fs, currFilePath, *cfd, locking, &server_wHandler),
+					SIMPLE_REQ_HANDLER(server, fs_create(server->fs, currFilePath, *cfd, locking, &server_wHandler, server->pfd[1]),
 						fs_create, cfd, "error while handling request");
 				} else {
-					SIMPLE_REQ_HANDLER(server, fs_open(server->fs, currFilePath, *cfd, locking), fs_create, cfd, "error while handling request");
+					SIMPLE_REQ_HANDLER(server, fs_open(server->fs, currFilePath, *cfd, locking), fs_open, cfd, "error while handling request");
 				}
 				break;
 			}
@@ -731,34 +739,35 @@ void* server_worker(wArgs_t* wArgs){
 				void* content = msg->args[1].content;
 				size_t size = msg->args[1].len;
 				bool wr = (msg->type == M_WRITEF ? true : false);
-				SIMPLE_REQ_HANDLER(server, fs_write(server->fs, currFilePath, content, size, *cfd, wr, &server_wHandler, &server_sbHandler),
+				SIMPLE_REQ_HANDLER(server, fs_write(server->fs, currFilePath, content, size, *cfd, wr, &server_wHandler, &server_sbHandler, server->pfd[1]),
 					fs_write, cfd, "error while handling request");
 				break;
-			}
-			
-			default : { /* Unknown message type, best thing to do is close connection */
-				*cfd = fd_switch(*cfd);
-				FD_SENDBACK(server, cfd);
-				break;
-			}
+			}			
+			default : { break; } /* Unknown message type, best thing to do is close connection */
 		} /* end of switch */
 		msg_destroy(msg, free, free);
 		msg = NULL;
+		if (cfd != NULL){ /* Connection closed during handling, we need to do cleanup */
+			if (*cfd < 0) fd_switch(cfd); /* => >= 0 */
+			SYSCALL_EXIT( server_cleanup_handler(server, *cfd, &newowners) , "server_worker: while handling client cleanup");
+			fd_switch(cfd); /* => < 0 */
+			FD_SENDBACK(server, cfd);
+		}
 		/* Handle other(s) new lock owner(s) */
-		while (true){
+		while (newowners->size > 0){
 			SYSCALL_RETURN( (popret = llist_pop(newowners, &cfd)), NULL, "server_worker: while getting next lock owner");
 			if (popret == 1) break;
 			send_ret = msend(*cfd, &msg, M_OK, NULL, NULL);
 			HANDLE_SEND_RET(server, send_ret, cfd);
 			if (send_ret == -1){ /* Connection closed */
-				if (*cfd < 0) *cfd = fd_switch(*cfd);
+				if (*cfd < 0) fd_switch(cfd);
 			}
 			FD_SENDBACK(server, cfd);		
 		}
 	} /* end of while loop */
 	printf("Worker #%d - exiting\n", wArgs->workerId);
 	SYSCALL_EXIT(llist_destroy(newowners, free), "Worker #%d - while destroying newowners queue\n");
-	return NULL;
+	return (void*)0;
 }
 
 
@@ -792,38 +801,52 @@ int server_start(server_t* server, wArgs_t** wArgs){
 
 
 /**
- * @brief Dumps all relevant information of
- * server and its data structures to file
- * pointed by stream.
+ * @brief Dumps all relevant information of server and its 
+ * data structures to file pointed by stream.
+ * @return 0 on success, -1 on error, 1 if any worker has returned
+ * a non-zero value.
  */
-void server_dump(server_t* server, FILE* stream){
-	if (!server) return;
+int server_dump(server_t* server, wArgs_t** wArgsArray, FILE* stream){
+	int retval = 0;
+	if (!server) return -1;
 	if (!stream) stream = stdout; /* Default */
 	fprintf(stream, "********** SERVER DUMP **********\n");
+	fprintf(stream, "server_dump: now dumping general information on server\n");
 	DUMPVAR(stream, server_dump, server->sa.sun_path, char*);
-	DUMPVAR(stream, server_dump, server->pfd[0], int);
-	DUMPVAR(stream, server_dump, server->pfd[1], int);
-	DUMPVAR(stream, server_dump, server->sockfd, int);
 	DUMPVAR(stream, server_dump, server->nactives, int);
-	DUMPVAR(stream, server_dump, server->maxlisten, int);
 	DUMPVAR(stream, server_dump, server->sockBacklog, int);
 	fprintf(stream, "server_dump: now dumping file storage information and statistics\n");
 	fs_dumpAll(server->fs);
-	fprintf(stream, "********** SERVER DUMP **********\n");	
+	fprintf(stream, "server_dump: now dumping workers information and statistics\n");
+	void* wret;
+	for (int i = 0; i < server->wpool->nworkers; i++){
+		if (wpool_retval(server->wpool, i, &wret) != 0){
+			printf("server_dump: error while fetching thread worker #%d return value\n", i);
+			retval = -1;
+			break;
+		}
+		printf("server_dump: thread worker #%d return value = %ld\n", i, (long)wret);
+		if ((long)wret != 0) retval = 1;
+	}	
+	fprintf(stream, "********** SERVER DUMP **********\n");
+	return retval;
 }
 
 
 /**
  * @brief Joins workers pool and handles server
  * statistics stdout dumping at end of mainloop.
+ * @return 0 on success, -1 on error, 1 if a worker
+ * has returned a non-zero value.
  */
-int server_end(server_t* server){ 
+int server_end(server_t* server, wArgs_t** wArgsArray){
+	int retval = 0;
 	SYSCALL_RETURN(wpool_joinAll(server->wpool), -1, "server_end: wpool_joinAll");
-	server_dump(server, stdout);
+	retval = server_dump(server, wArgsArray, stdout);
 	CLOSE_CHANNELS(server); /* Closes pipe and listen socket */
 	CLOSE_ALL_CFDS(server); /* Closed ALL (still active) client fds */
 	server->maxlisten = -1; /* No listening connection */
-	return 0;
+	return retval;
 }
 
 
@@ -848,9 +871,8 @@ int server_destroy(server_t* server){
 }
 
 
-
-
 int main(int argc, char* argv[]){
+	int retval = EXIT_SUCCESS; /* return value for main */
 	config_t config;
 	server_t* server;
 	wArgs_t** wArgsArray; /* Array of worker arguments */
@@ -858,17 +880,12 @@ int main(int argc, char* argv[]){
 	sigset_t sigmask; /* Sigmask for correct signal handling "dispatching" */
 	llist_t* optvals; /* For parsing cmdline options */
 	char configFile[MAXPATHSIZE]; /* Path of configuration file */
-	
 	memset(configFile, 0, sizeof(configFile));
 	/* Set default configuration file */
 	strncpy(configFile, DFL_CONFIG, strlen(DFL_CONFIG)+1);
-	
-	
 	/* Signals masking */
 	SYSCALL_EXIT(sigfillset(&sigmask), "sigfillset");
 	SYSCALL_EXIT(pthread_sigmask(SIG_SETMASK, &sigmask, NULL), "sigmask");
-	
-
 	/* Termination signals */
 	memset(&sa_term, 0, sizeof(sa_term));
 	sa_term.sa_handler = term_sighandler;
@@ -962,9 +979,8 @@ int main(int argc, char* argv[]){
 	
 	/* Mainloop and final joining/cleaning */
 	SYSCALL_EXIT(server_manager(server), "server_manager");
-	SYSCALL_EXIT(server_end(server), "server_end");
-	
+	SYSCALL_EXIT((retval = server_end(server, wArgsArray)), "server_end");	
 	DESTROY_WARGS(wArgsArray, server->wpool->nworkers);
 	SYSCALL_EXIT(server_destroy(server), "server_destroy");
-	return 0;
+	return retval;
 }

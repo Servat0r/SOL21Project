@@ -131,8 +131,8 @@ static int fs_trash(FileStorage_t* fs, FileData_t* fdata, char* filename){
  *	- EINVAL: invalid arguments;
  *	- any error by llist_pop.
  */
-static int fs_replace(FileStorage_t* fs, int client, int mode, size_t size, int (*waitHandler)(tsqueue_t* waitQueue), 
-	int (*sendBackHandler)(char* pathname, void* content, size_t size, int cfd, bool modified)){
+static int fs_replace(FileStorage_t* fs, int client, int mode, size_t size, int (*waitHandler)(int chan, tsqueue_t* waitQueue), 
+	int (*sendBackHandler)(char* pathname, void* content, size_t size, int cfd, bool modified), int chan){
 	if (!waitHandler || (mode != R_CREATE && mode != R_WRITE)){ errno = EINVAL; return -1; }
 	int ret = 0;
 	char* next;
@@ -158,7 +158,7 @@ static int fs_replace(FileStorage_t* fs, int client, int mode, size_t size, int 
 		}
 		SYSCALL_NOTREC(fs_trash(fs, file, next), -1, NULL); /* Updates automatically spaceSize */
 		free(next); /* Frees key extracted from replQueue */
-		waitHandler(waitQueue); /* Errors are ignored (queue is untouched) */ //FIXME Sure??
+		SYSCALL_NOTREC(waitHandler(chan, waitQueue), -1, "fs_replace: waitHandler");
 		/* We CANNOT avoid (at least a) memory leak */
 		SYSCALL_NOTREC(tsqueue_destroy(waitQueue, free), -1, "fs_replace: while destroying waiting queue");
 		bcreate = (fs->fmap->nentries >= fs->maxFileNo) && (mode == R_CREATE); /* Conditions to expel a file for creating a new one */
@@ -310,7 +310,7 @@ FileStorage_t* fs_init(int nbuckets, size_t storageCap, int maxFileNo){
  *	- any error by fs_replace, fs_search, fdata_create, make_entry,
  * icl_hash_insert, tsqueue_push. 
  */
-int	fs_create(FileStorage_t* fs, char* pathname, int client, bool locking, int (*waitHandler)(tsqueue_t* waitQueue)){
+int	fs_create(FileStorage_t* fs, char* pathname, int client, bool locking, int (*waitHandler)(int chan, tsqueue_t* waitQueue), int chan){
 	if (!pathname || (client < 0) || !waitHandler){ errno = EINVAL; return -1; }
 	FileData_t* file;
 	bool bcreate = false;
@@ -341,7 +341,7 @@ int	fs_create(FileStorage_t* fs, char* pathname, int client, bool locking, int (
 	} else {
 		bcreate = (fs->fmap->nentries >= fs->maxFileNo);
 		if (bcreate){
-			int repl = fs_replace(fs, client, R_CREATE, 0, waitHandler, NULL);
+			int repl = fs_replace(fs, client, R_CREATE, 0, waitHandler, NULL, chan);
 			if (repl != 0){ /* Error while expelling files */
 				if (repl == -1) perror("While updating cache");
 				fs_op_end(fs);
@@ -530,7 +530,7 @@ int	fs_readN(FileStorage_t* fs, int client, int N, llist_t** results){
  *	- any error by fs_search and fdata_write.
  */
 int	fs_write(FileStorage_t* fs, char* pathname, void* buf, size_t size, int client, bool wr,
-	int (*waitHandler)(tsqueue_t* waitQueue), int (*sendBackHandler)(char* pathname, void* content, size_t size, int cfd, bool modified)){
+	int (*waitHandler)(int chan, tsqueue_t* waitQueue), int (*sendBackHandler)(char* pathname, void* content, size_t size, int cfd, bool modified), int chan){
 	
 	if (!pathname || !buf || (size < 0) || (client < 0) || !waitHandler){ errno = EINVAL; return -1; }
 	bool bwrite;
@@ -548,7 +548,7 @@ int	fs_write(FileStorage_t* fs, char* pathname, void* buf, size_t size, int clie
 		}
 		bwrite = (fs->spaceSize + size > fs->storageCap); /* These values are NOT modified (only ONE modifier at a time) */
 		if (bwrite){
-			int repl = fs_replace(fs, client, R_WRITE, size, waitHandler, sendBackHandler);
+			int repl = fs_replace(fs, client, R_WRITE, size, waitHandler, sendBackHandler, chan);
 			if (repl != 0){ /* Error while expelling files */
 				if (repl == -1) perror("While updating cache");
 				fs_op_end(fs);
@@ -637,7 +637,7 @@ int fs_unlock(FileStorage_t* fs, char* pathname, int client, llist_t** newowner)
  *	- ENOENT: file does not exist;
  *	- any error by FileData_trash, icl_hash_delete, fs_search, tsqueue_iter_*.
  */
-int fs_remove(FileStorage_t* fs, char* pathname, int client, int (*waitHandler)(tsqueue_t* waitQueue)){
+int fs_remove(FileStorage_t* fs, char* pathname, int client, int (*waitHandler)(int chan, tsqueue_t* waitQueue), int chan){
 	if (!pathname || (client < 0) || !waitHandler){ errno = EINVAL; return -1; }
 	FileData_t* file;
 	int ret = 0;
@@ -652,7 +652,7 @@ int fs_remove(FileStorage_t* fs, char* pathname, int client, int (*waitHandler)(
 			fs_op_end(fs);
 			return -1;
 		}
-		waitHandler(waitQueue);
+		SYSCALL_NOTREC(waitHandler(chan, waitQueue), -1, "fs_remove: waitHandler");
 		/* Unavoidable memory leak */
 		FS_NOTREC_UNLOCK(fs, tsqueue_destroy(waitQueue, free), "fs_remove: while destroying waiting queue");
 		/* "Phantom" file */
@@ -776,8 +776,6 @@ void fs_dumpAll(FileStorage_t* fs){ /* Dumps all files and storage info */
 	FileData_t* file;
 	int tmpint;
 	icl_entry_t* tmpentry;
-	fs_wop_init(fs);
-	printf("\n***********************************\n");
 	printf("fs_dump: start\n");
 	printf("fs_dump: byte-size of FileStorage_t object = %lu\n", sizeof(*fs));
 	printf("fs_dump: storage capacity (bytes) = %lu\n", fs->storageCap);
@@ -795,7 +793,5 @@ void fs_dumpAll(FileStorage_t* fs){ /* Dumps all files and storage info */
 	printf("fs_dump: max storage size = %d\n", fs->maxSpaceSize);
 	printf("fs_dump: cache replacement algorithm executions = %d\n", fs->replCount);
 	printf("fs_dump: client info cleanup executions = %d\n", fs->cleanupCount);
-	printf("fs_dump: end");
-	printf("\n***********************************\n");
-	fs_op_end(fs);	
+	printf("fs_dump: end\n");
 }

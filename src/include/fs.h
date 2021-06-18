@@ -82,9 +82,9 @@ void
 
 int
 	/* Modifying operations */
-	fs_create(FileStorage_t* fs, char* pathname, int client, bool locking, int (*waitHandler)(tsqueue_t* waitQueue)),
+	fs_create(FileStorage_t* fs, char* pathname, int client, bool locking, int (*waitHandler)(int chan, tsqueue_t* waitQueue), int chan),
 	fs_clientCleanup(FileStorage_t* fs, int client, llist_t** newowners_list),
-	fs_remove(FileStorage_t* fs, char* pathname, int client, int (*waitHandler)(tsqueue_t* waitQueue)),
+	fs_remove(FileStorage_t* fs, char* pathname, int client, int (*waitHandler)(int chan, tsqueue_t* waitQueue), int chan),
 	
 	/* Non-modifying operations that DO NOT call modifying ones */
 	fs_open(FileStorage_t* fs, char* pathname, int client, bool locking),
@@ -94,7 +94,7 @@ int
 	
 	/* Non-modifying operations that COULD call modifying ones */
 	fs_write(FileStorage_t* fs, char* pathname, void* buf, size_t size, int client, bool wr,
-		int (*waitHandler)(tsqueue_t* waitQueue), int (*sendBackHandler)(char* pathname, void* content, size_t size, int cfd, bool modified)),
+		int (*waitHandler)(int chan, tsqueue_t* waitQueue), int (*sendBackHandler)(char* pathname, void* content, size_t size, int cfd, bool modified), int chan),
 	
 	/**
 	 * @brief Registrazione di cosa ogni thread vuole fare:
