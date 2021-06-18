@@ -1,0 +1,49 @@
+# The following is the configuration file for the OS Project.
+
+# This is a single line comment.
+
+# Syntax is: <param_name> = <value>, where <param_name> is a character that can be followed
+# by a sequence of alphanumeric characters, and <value> can contain ANY character.
+# Any unrecognized attribute is ignored by the parser.
+# There MUST be spaces between any variable name and its value (otherwise it is generated
+# an error) in order to simplify parsing of the file.
+# The server will start iff these fields are correct:
+#	- SocketPath != NULL & a correct pathname;
+#	- WorkersInPool > 0;
+#	- Total sum of "Storage*" > 0;
+#	- MaxFileNo > 0;
+#	- FileStorageBuckets > 0.
+
+
+# Path of the server socket (eventualmente togliere tmp)
+SocketPath = bin/tmp/serverSocket.sk 
+
+
+# Number of worker threads
+WorkersInPool = 1
+
+
+# Total storage byte-size is sum of the following fields (multiplied by 2^30, 2^20, 2^10)
+# GBytes of storage size
+StorageGBSize = 0
+
+
+# MBytes of storage size
+StorageMBSize = 128
+
+
+# KBytes of storage size
+StorageKBSize = 0
+
+
+# Max File Capacity of the server
+MaxFileNo = 10000
+
+
+# Number of buckets of the file storage.
+FileStorageBuckets = 100
+
+
+# Length of backlog queue for server.
+# When 0, this field shall be set to SOMAXCONN.
+SockBacklog = 10

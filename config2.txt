@@ -23,13 +23,13 @@ SocketPath = bin/tmp/serverSocket.sk
 WorkersInPool = 4
 
 
-# Total storage size is sum of the following fields (multiplied by 2^20, 2^10, 1)
+# Total storage byte-size is sum of the following fields (multiplied by 2^30, 2^20, 2^10)
 # GBytes of storage size
 StorageGBSize = 0
 
 
 # MBytes of storage size
-StorageMBSize = 100
+StorageMBSize = 1
 
 
 # KBytes of storage size
@@ -37,7 +37,7 @@ StorageKBSize = 0
 
 
 # Max File Capacity of the server
-MaxFileNo = 100
+MaxFileNo = 10
 
 
 # Number of buckets of the file storage.

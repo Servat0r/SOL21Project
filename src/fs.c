@@ -146,7 +146,7 @@ static int fs_replace(FileStorage_t* fs, int client, int mode, size_t size, int 
 		 /* Either an error occurred and waiting queue is untouched or queue is empty/closed (this error is NOT fatal!) */
 		if (pop != 0) return (pop > 0 ? 1 : -1);
 		/* Filename successfully extracted */
-		printf("Filename successfully extracted, it is: %s\n", next);
+		printf("fs_replace: filename successfully extracted, it is: %s\n", next);
 		file = icl_hash_find(fs->fmap, next);
 		if (!file) continue; /* File not existing anymore */
 		waitQueue = fdata_waiters(file);
@@ -163,7 +163,6 @@ static int fs_replace(FileStorage_t* fs, int client, int mode, size_t size, int 
 		SYSCALL_NOTREC(tsqueue_destroy(waitQueue, free), -1, "fs_replace: while destroying waiting queue");
 		bcreate = (fs->fmap->nentries >= fs->maxFileNo) && (mode == R_CREATE); /* Conditions to expel a file for creating a new one */
 		bwrite = (fs->spaceSize + size > fs->storageCap) && (mode == R_WRITE); /* Conditions to expel a file for writing into an existing one */
-		printf("bcreate = %d, bwrite = %d\n", bcreate, bwrite);
 	} while (bcreate || bwrite);
 	return ret;
 }

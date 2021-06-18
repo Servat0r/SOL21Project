@@ -449,7 +449,7 @@ int server_sbHandler(char* pathname, void* content, size_t size, int cfd, bool m
 }
 
 
-/* Calls fs_clientCleanup */
+/* Calls fs_clientCleanup and sends back *cfd for indicating closed connection */
 int server_cleanup_handler(server_t* server, int* cfd, llist_t** newowners){
 	int send_ret;
 	message_t* msg;
@@ -478,6 +478,13 @@ int server_cleanup_handler(server_t* server, int* cfd, llist_t** newowners){
  */
 server_t* server_init(config_t* config){
 	if (!config) return NULL;
+	
+	/* Checks correctness of config parameters as stated in config files */
+	if (!config->socketPath) return NULL;
+	else if (config->workersInPool <= 0) return NULL;
+	else if (config->storageSize <= 0) return NULL;
+	else if (config->maxFileNo <= 0) return NULL;
+	else if (config->fileStorageBuckets <= 0) return NULL;
 	
 	server_t* server = malloc(sizeof(server_t));
 	if (!server) return NULL;
@@ -647,10 +654,8 @@ void* server_worker(wArgs_t* wArgs){
 		recv_ret = mrecv(*cfd, &msg, NULL, NULL);
 		if (recv_ret == -1){ //msg == NULL
 			if (errno == EBADMSG){ /* connection closed */
-				/* Handles cleanup */
-				SYSCALL_EXIT( server_cleanup_handler(server, *cfd, &newowners) , "server_worker: while handling client cleanup");
-				fd_switch(cfd); /* < 0 */
-				FD_SENDBACK(server, cfd);
+				/* Handles cleanup and sending back *cfd to manager */
+				SYSCALL_EXIT( server_cleanup_handler(server, cfd, &newowners) , "server_worker: while handling client cleanup");
 				continue;
 			} else {
 				perror("server_worker: while getting message");
@@ -749,9 +754,7 @@ void* server_worker(wArgs_t* wArgs){
 		msg = NULL;
 		if (cfd != NULL){ /* Connection closed during handling, we need to do cleanup */
 			if (*cfd < 0) fd_switch(cfd); /* => >= 0 */
-			SYSCALL_EXIT( server_cleanup_handler(server, *cfd, &newowners) , "server_worker: while handling client cleanup");
-			fd_switch(cfd); /* => < 0 */
-			FD_SENDBACK(server, cfd);
+			SYSCALL_EXIT( server_cleanup_handler(server, cfd, &newowners) , "server_worker: while handling client cleanup");
 		}
 		/* Handle other(s) new lock owner(s) */
 		while (newowners->size > 0){
