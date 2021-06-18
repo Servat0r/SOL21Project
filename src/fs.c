@@ -154,7 +154,7 @@ static int fs_replace(FileStorage_t* fs, int client, int mode, size_t size, int 
 		if (sendBackHandler){ /* Passed an handler to send back file content (NULL for fs_create!) */
 			void* file_content = file->data;
 			size_t file_size = file->size;
-			sendBackHandler(next, file_content, file_size, client, (file->flags & O_DIRTY ? true : false)); /* Errors are ignored (file content and size are untouched) */ //FIXME Sure??
+			sendBackHandler(next, file_content, file_size, client, (file->flags & O_DIRTY ? true : false) ); /* Errors are ignored (file content and size are untouched) */ //FIXME Sure??
 		}
 		SYSCALL_NOTREC(fs_trash(fs, file, next), -1, NULL); /* Updates automatically spaceSize */
 		free(next); /* Frees key extracted from replQueue */
@@ -629,11 +629,11 @@ int fs_unlock(FileStorage_t* fs, char* pathname, int client, llist_t** newowner)
 /**
  * @brief Removes the file identified by #pathname from the file storage.
  * This operation succeeds iff O_LOCK is set and client is its current owner.
- * @return 0 on success, -1 on error, 1 if O_LOCK is not set or LF_OWNER is
- * NOT set for client (i.e., calling client CANNOT remove file);
+ * @return 0 on success, -1 on error.
  * Possible errors are:
  *	- EINVAL: invalid arguments;
  *	- ENOENT: file does not exist;
+ *	- EPERM: calling client CANNOT remove file;
  *	- any error by FileData_trash, icl_hash_delete, fs_search, tsqueue_iter_*.
  */
 int fs_remove(FileStorage_t* fs, char* pathname, int client, int (*waitHandler)(int chan, tsqueue_t* waitQueue), int chan){
@@ -675,7 +675,10 @@ int fs_remove(FileStorage_t* fs, char* pathname, int client, int (*waitHandler)(
 			}
 		}
 		FS_NOTREC_UNLOCK(fs, tsqueue_iter_end(fs->replQueue), "fs_remove: while ending iteration on waiting queue");
-	} else ret = 1;
+	} else {
+		errno = EPERM;
+		ret = -1;
+	}
 	fs_op_end(fs);
 	return ret;
 }

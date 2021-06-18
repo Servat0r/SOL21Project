@@ -76,6 +76,25 @@ ssize_t getArgn(msg_t type){
 	return -1; /* type is not valid */
 }
 
+/* Gets a string description of any message type */
+char* print_reqtype(msg_t type){
+	switch(type){
+		case M_OK: return "confirmation(s)\n";
+		case M_ERR: return "error(s)\n";
+		case M_READF: return "file read(s)\n";
+		case M_READNF: return "readNFiles request(s)\n";
+		case M_CLOSEF: return "file closing request(s)\n";
+		case M_LOCKF: return "file locking request(s)\n";
+		case M_UNLOCKF: return "file unlocking request(s)\n";
+		case M_REMOVEF: return "file removing request(s)\n";
+		case M_OPENF: return "file opening request(s)\n";
+		case M_WRITEF: return "writing content of file request(s)\n";
+		case M_APPENDF: return "appending content to file request(s)\n";
+		case M_GETF: return "file getting request(s)\n";
+	}
+	return NULL;
+}
+
 
 /* ***************************** packet_t functions **************************************** */
 
@@ -173,6 +192,7 @@ int msg_destroy(message_t* msg, void (*freeArgs)(void*), void (*freeContent)(voi
  * @return 1 on success, -1 on error during a writen, 0 if a writen returned 0.
  * Possible errors are:
  *	- EBADMSG: a writen has returned 0 and so the message has not been completely sent;
+ *	- EPIPE: during writing on pipe/socket, the reading endpoint has been closed;
  *	- any error by writen.
 */
 int msg_send(message_t* msg, int fd){
@@ -217,7 +237,8 @@ int msg_send(message_t* msg, int fd){
  * that all heap-allocated memory for receiving arguments other than message type and argn would
  * have been freed BEFORE returning, so there could not be memory leaks. 
  * Possible errors are:
- *	- EBADMSG: EOF was read during a readn, and so the message has not been completely read;
+ *	- EBADMSG: EOF was read during a readn before having completely read all message content,
+ *		and so the message has not been completely read;
  *	- ENOMEM: unable to allocate memory to store received content;
  *	-any error by readn.
 */
@@ -274,7 +295,8 @@ void printMsg(message_t* req){
  * @return 0 on success, -1 on error.
  * Possible errors are:
  *	- ENOMEM: unable to allocate memory for msg;
- *	- all errors by msg_send: EBADMSG and any error by writen.
+ *	- EBADMSG: message has not been completely sent;
+ *	- EPIPE: when writing on socket/pipe, the other endpoint has been closed.
  */
 int msend(int fd, message_t** msg, msg_t type, char* creatmsg, char* sendmsg, ...){
 	*msg = msg_init();
@@ -325,7 +347,8 @@ int msend(int fd, message_t** msg, msg_t type, char* creatmsg, char* sendmsg, ..
  * message is NULL.
  * Possible errors are:
  *	- ENOMEM: unable to allocate memory for msg;
- *	- all errors by msg_recv: EBADMSG and any error by readn.
+ *	- EBADMSG: message has not been completely receive because EOF was read;
+ *	- any other error by msg_recv/msg_init.
  */
 int mrecv(int fd, message_t** msg, char* creatmsg, char* recvmsg){
 	*msg = msg_init();

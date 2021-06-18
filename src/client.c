@@ -22,8 +22,8 @@
 #define CLOSECONN_FAILMSG "Failed to close connection with server"
 
 /* Parameters for openConnection */
-#define MSEC_DELAY_OPENCONN 250 /* Milliseconds between two attempts to connect */
-#define SEC_MAXTIME_OPENCONN 5 /* (Entire) seconds that should last after openConnection failure */
+#define MSEC_DELAY_OPENCONN 1000 /* Milliseconds between two attempts to connect */
+#define SEC_MAXTIME_OPENCONN 10 /* (Entire) seconds that should last after openConnection failure */
 #define NSEC_MAXTIME_OPENCONN 0 /* Nanoseconds (after above seconds) that should last after openConnection failure */
 
 

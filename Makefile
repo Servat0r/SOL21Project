@@ -1,5 +1,5 @@
 CC		=  gcc
-CFLAGS	+= -Wall -g -pedantic -Wno-unused-function
+CFLAGS	+= -Wall -g -pedantic
 #Main directories
 SRC		= src
 BIN		= bin
@@ -36,19 +36,10 @@ includes := -I $(SRC)/ -I $(INCLUDE)/
 
 #Generals
 
-all : execs $(tests)
+all : $(execs)
 
 test : $(tests)
 
-debug :
-	@echo headers = $(headers)
-	@echo hlib = $(hlib)
-	@echo objects = $(objects)
-	@echo tests = $(tests)
-	@echo execs = $(execs)
-	@echo dlpath = $(dlpath)
-	@echo includes = $(includes)
-	@echo targets = $(TARGETS)
 
 $(tests) : $(TEST)/% : $(TEST)/%.c libshared.so
 	$(CC) $(includes) $(CFLAGS) $< -o $(BIN)/$@ $(LTHREAD) $(dlpath) -L $(LIB)/ -lshared
@@ -64,4 +55,3 @@ $(objects) : $(OBJS)/%.o : $(SRC)/%.c $(INCLUDE)/%.h $(hlib)
 
 clean :
 	-rm $(TARGETS)
-

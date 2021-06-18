@@ -107,7 +107,7 @@ int readn(long fd, void *buf, size_t size) {
 /**
  * @brief Avoids partial writes.
  * @return 1 on success, -1 on error (errno set),
- * 0 if a write returns a 0
+ * 0 if a write returns a 0.
  */
 int writen(long fd, void *buf, size_t size) {
     size_t left = size;

@@ -234,6 +234,7 @@ int openConnection(const char* sockname, int msec, const struct timespec abstime
 		while (true){
 			pfd[0].revents = 0;
 			res = connect(serverfd, &serverAddr, UNIX_PATH_MAX);
+			if ((res == -1) && prints_enabled) { fprintf(stderr, "[process %d] [%s] openConnection:", getpid(), serverAddr.sun_path); perror(NULL); }
 			/* SUCCESS */
 			if (res == 0){
 				close(tfd);

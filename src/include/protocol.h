@@ -38,6 +38,8 @@
 */
 typedef enum {M_OK, M_ERR, M_OPENF, M_READF, M_READNF, M_GETF, M_WRITEF, M_APPENDF, M_CLOSEF, M_LOCKF, M_UNLOCKF, M_REMOVEF} msg_t;
 
+/* #{elements} in the above enum */
+#define MTYPES_SIZE 12
 
 /* A single information packet: len + content! */
 typedef struct packet_s {
@@ -54,6 +56,10 @@ typedef struct message_s {
 
 
 /* ************************************ Prototypes ************************************* */
+
+char*
+	print_reqtype(msg_t);
+
 ssize_t
 	getArgn(msg_t);
 

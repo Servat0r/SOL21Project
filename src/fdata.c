@@ -301,9 +301,8 @@ int	fdata_write(FileData_t* fdata, void* buf, size_t size, int client, bool wr){
 		}
 	}
 	if (ret == 0){
-		/* Modified (ONLY when appending content to file) */
-		if (!wr) fdata->flags |= O_DIRTY;
-
+		/* Modified (writing operation) */
+		fdata->flags |= O_DIRTY;
 		fdata->clients[client] &= ~LF_WRITE; /* A writeFile will fail */
 	}
 	RWL_UNLOCK(&fdata->lock);
