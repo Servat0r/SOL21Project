@@ -81,6 +81,9 @@ static int result_msg(int result, char* msg, size_t size){
 			strncpy(msg, "Fatal error on server", size);
 			break;
 		}
+		case EFBIG: {
+			strncpy(msg, "File content is bigger than storage capacity", size);
+		}
 		default: {
 			strncpy(msg, "Unknown result code", size);
 			break;
@@ -131,7 +134,7 @@ do{\
 
 #define PRINT_OP_SIMPLE(op, file, code) \
 do { \
-	char* format = "[process %d] <operation = '%s'> <filename = '%s'> <result = '%s'>\n"; \
+	char* format = "[process %d] [operation = '\033[4;37m%s\033[0m'] [filename = '%s'] [result = '%s']\n"; \
 	char response[1024]; \
 	if (prints_enabled){ \
 		if (result_msg(code, response, RESP_SIZE) == -1) break; \
@@ -142,7 +145,7 @@ do { \
 
 #define PRINT_OP_RD(op, file, code, rbytes) \
 do { \
-	char* format = "[process %d] <operation = '%s'> <filename = '%s'> <result = '%s'> <read bytes = %lu>\n"; \
+	char* format = "[process %d] [operation = '\033[4;37m%s\033[0m'] [filename = '%s'] [result = '%s'] [read bytes = \033[1;37m%lu\033[0m]\n"; \
 	char response[1024]; \
 	if (prints_enabled){ \
 		if (result_msg(code, response, RESP_SIZE) == -1) break; \
@@ -153,7 +156,7 @@ do { \
 /* For printing number of read files for readNFiles */
 #define PRINT_OP_RDNF(op, N, code, rbytes) \
 do { \
-	char* format = "[process %d] <operation = '%s'> <Nfiles = %d> <result = '%s'> <read bytes = %lu>\n"; \
+	char* format = "[process %d] [operation = '\033[4;37m%s\033[0m'] [Nfiles = %d] [result = '%s'] [read bytes = \033[1;37m%lu\033[0m]\n"; \
 	char response[1024]; \
 	if (prints_enabled){ \
 		if (result_msg(code, response, RESP_SIZE) == -1) break; \
@@ -164,7 +167,7 @@ do { \
 
 #define PRINT_OP_WR(op, file, code, wbytes) \
 do { \
-	char* format = "[process %d] <operation = '%s'> <filename = '%s'> <result = '%s'> <written bytes = %lu>\n"; \
+	char* format = "[process %d] [operation = '\033[4;37m%s\033[0m'] [filename = '%s'] [result = '%s'] [written bytes = \033[1;37m%lu\033[0m]\n"; \
 	char response[1024]; \
 	if (prints_enabled){ \
 		if (result_msg(code, response, RESP_SIZE) == -1) break; \
@@ -234,7 +237,7 @@ int openConnection(const char* sockname, int msec, const struct timespec abstime
 		while (true){
 			pfd[0].revents = 0;
 			res = connect(serverfd, &serverAddr, UNIX_PATH_MAX);
-			if ((res == -1) && prints_enabled) { fprintf(stderr, "[process %d] [%s] openConnection:", getpid(), serverAddr.sun_path); perror(NULL); }
+			if ((res == -1) && prints_enabled) { fprintf(stderr, "[process %d] openConnection: ", getpid(), serverAddr.sun_path); perror(NULL); }
 			/* SUCCESS */
 			if (res == 0){
 				close(tfd);
@@ -254,7 +257,7 @@ int openConnection(const char* sockname, int msec, const struct timespec abstime
 				res = poll(pfd, 1, msec);
 				if (res == 1){ /* Timeout expired , pfd.revents & POLLIN*/
 					errno = ETIMEDOUT;
-					perror("openConnection: while waiting for connecting");
+					if (prints_enabled) { fprintf(stderr, "[process %d] openConnection: while waiting for connecting", getpid()); perror(NULL); }
 					break;
 				} else if (res == 0) continue; /* No notification by timer */
 				else perror("openConnection: poll");
@@ -293,6 +296,7 @@ int closeConnection(const char* sockname){
 	}
 	close(serverfd);
 	serverfd = -1; /* Available for new connections */
+	if (prints_enabled) printf("[process %d] closeConnection succeeded\n", getpid());
 	return 0;
 }
 

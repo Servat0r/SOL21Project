@@ -22,6 +22,9 @@
 #define S_CLOSED 1
 #define S_SHUTDOWN 2
 
+/* Cyan-colored string for server dump */
+#define SERVER_DUMP_CYAN "\033[1;36mserver_dump:\033[0m"
+
 /* Default parameters for configuration */
 #define DFL_CONFIG "config.txt"
 #define PARSEDICT_BUCKETS 5 /* #{buckets} for the dictionary for parsing config file */
@@ -411,9 +414,10 @@ int server_wHandler(int chan, tsqueue_t* waitQueue){
 		if (!cfd) continue; /* NULL pointer in queue */
 		int send_ret = msend(*cfd, &msg, M_ERR, NULL, NULL,sizeof(error), &error);
 		HANDLE_SEND_RET(send_ret, cfd);
+		int cfdcopy = *cfd;
+		if (*cfd < 0) fd_switch(cfd); /* original queue shall be untouched */
 		/* If connection has been closed, then a fd < 0 shall be sent */
-		SYSCALL_NOTREC(write(chan, cfd, sizeof(*cfd)) , -1, "server_wHandler: while sending back client fd");
-		if (*cfd < 0) fd_switch(cfd);
+		SYSCALL_NOTREC(write(chan, &cfdcopy, sizeof(cfdcopy)) , -1, "server_wHandler: while sending back client fd");
 	}
 	SYSCALL_NOTREC(tsqueue_iter_end(waitQueue), -1, "server_wHandler: while ending iteration");
 	return 0;
@@ -561,7 +565,7 @@ int server_manager(server_t* server){
 		if (pres == -1){
 			if (errno == EINTR){ /* Signal caught or other interrupt */
 				if (serverState != S_OPEN){
-					printf("Termination signal caught\n");
+					printf("\033[1;35mTermination signal caught\033[0m\n");
 					CLOSE_LSOCKET(server);
 				} /* No more connections (data in server->rdset are NOT valid!) */
 				if (serverState == S_CLOSED) continue;
@@ -831,29 +835,24 @@ int server_start(server_t* server, wArgs_t** wArgs){
  * @return 0 on success, -1 on error, 1 if any worker has returned
  * a non-zero value.
  */
-int server_dump(server_t* server, wArgs_t** wArgsArray, FILE* stream){
+int server_dump(server_t* server, wArgs_t** wArgsArray){
 	int retval = 0;
 	if (!server) return -1;
-	if (!stream) stream = stdout; /* Default */
-	fprintf(stream, "********** SERVER DUMP **********\n");
-	fprintf(stream, "server_dump: now dumping general information on server\n");
-	DUMPVAR(stream, server_dump, server->sa.sun_path, char*);
-	DUMPVAR(stream, server_dump, server->nactives, int);
-	DUMPVAR(stream, server_dump, server->sockBacklog, int);
-	fprintf(stream, "server_dump: now dumping file storage information and statistics\n");
-	fs_dumpAll(server->fs);
-	fprintf(stream, "server_dump: now dumping workers information and statistics\n");
+	printf("\033[1;36mSERVER DUMP\033[0m\n");
+	printf("%s now dumping file storage information and statistics\n", SERVER_DUMP_CYAN);
+	fs_dumpAll(server->fs, stdout);
+	printf("%s now dumping workers information and statistics\n", SERVER_DUMP_CYAN);
 	void* wret;
 	for (int i = 0; i < server->wpool->nworkers; i++){
 		if (wpool_retval(server->wpool, i, &wret) != 0){
-			printf("server_dump: error while fetching thread worker #%d return value\n", i);
+			printf("%s error while fetching thread worker #%d return value\n", SERVER_DUMP_CYAN, i);
 			retval = -1;
 			break;
 		}
-		printf("server_dump: thread worker #%d return value = %ld\n", i, (long)wret);
+		printf("%s thread worker #%d return value = %ld\n", SERVER_DUMP_CYAN, wArgsArray[i]->workerId, (long)wret);
 		if ((long)wret != 0) retval = 1;
 	}	
-	fprintf(stream, "********** SERVER DUMP **********\n");
+	printf("\033[1;36mSERVER DUMP\033[0m\n");
 	return retval;
 }
 
@@ -867,7 +866,7 @@ int server_dump(server_t* server, wArgs_t** wArgsArray, FILE* stream){
 int server_end(server_t* server, wArgs_t** wArgsArray){
 	int retval = 0;
 	SYSCALL_RETURN(wpool_joinAll(server->wpool), -1, "server_end: wpool_joinAll");
-	retval = server_dump(server, wArgsArray, stdout);
+	retval = server_dump(server, wArgsArray);
 	CLOSE_CHANNELS(server); /* Closes pipe and listen socket */
 	CLOSE_ALL_CFDS(server); /* Closed ALL (still active) client fds */
 	server->maxlisten = -1; /* No listening connection */

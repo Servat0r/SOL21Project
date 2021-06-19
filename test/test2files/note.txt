@@ -1,0 +1,3 @@
+minifiles/* are 12 equal files of ~3kb size, used for checking replacement when overflowing file capacity.
+big1, big2, big3 are files whose size is between 300kb - 980kb, i.e. each one fits in the storage but they shall expel each other and minifiles.
+overflow is a file whose size is > 1mb, i.e. it shall be rejected with errno == E2BIG, and this shall be displayed on sending client.

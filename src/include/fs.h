@@ -33,6 +33,8 @@
 /* Default maxclient value for fdata_create */
 #define DFL_MAXCLIENT 1023
 
+/* Cyan-colored string for fs_dump */
+#define FSDUMP_CYAN "\033[1;36mfs_dump:\033[0m"
 
 /**
  * @brief Struct for hosting <size, content> couples for fs_readN.
@@ -42,6 +44,7 @@ typedef struct fcontent_s {
 	size_t size;
 	void* content;
 } fcontent_t;
+
 
 
 /**
@@ -123,6 +126,6 @@ int
 void
 	/* Dumping */
 	fs_dumpfile(FileStorage_t* fs, char* pathname), /* Equivalent to a fdata_printout to the file identified by 'pathname' */
-	fs_dumpAll(FileStorage_t* fs); /* Dumps all files and storage info to stream */
+	fs_dumpAll(FileStorage_t* fs, FILE* stream); /* Dumps all files and storage info to stream */
 		
 #endif /* _FS_H */

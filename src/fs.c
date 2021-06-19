@@ -142,11 +142,12 @@ static int fs_replace(FileStorage_t* fs, int client, int mode, size_t size, int 
 	tsqueue_t* waitQueue;
 	do {
 		waitQueue = NULL;
-		int pop = tsqueue_pop(fs->replQueue, &next, true);
+		int pop = tsqueue_pop(fs->replQueue, (void**)&next, true);
 		 /* Either an error occurred and waiting queue is untouched or queue is empty/closed (this error is NOT fatal!) */
 		if (pop != 0) return (pop > 0 ? 1 : -1);
 		/* Filename successfully extracted */
-		printf("fs_replace: filename successfully extracted, it is: %s\n", next);
+		printf("\033[1;31mfs_replace:\033[0m filename successfully extracted (type = \033[1;31m%s\033[0m), it is: \033[1;31m%s\033[0m\n",
+			(mode == R_CREATE ? "filecap_overflow" : "storagecap_overflow"), next);
 		file = icl_hash_find(fs->fmap, next);
 		if (!file) continue; /* File not existing anymore */
 		waitQueue = fdata_waiters(file);
@@ -773,27 +774,26 @@ void fs_dumpfile(FileStorage_t* fs, char* pathname){ /* Equivalent to a fdata_pr
  *	all statistics (maxFileHosted,...,cleanupCount), current number
  * 	of files hosted by fs and a list of all of them with their size.
  */
-void fs_dumpAll(FileStorage_t* fs){ /* Dumps all files and storage info */
+void fs_dumpAll(FileStorage_t* fs, FILE* stream){ /* Dumps all files and storage info */
+	if (!stream) stream = stdout; /* Default */
 	char* filename;
 	FileData_t* file;
 	int tmpint;
 	icl_entry_t* tmpentry;
-	printf("fs_dump: start\n");
-	printf("fs_dump: byte-size of FileStorage_t object = %lu\n", sizeof(*fs));
-	printf("fs_dump: storage capacity (bytes) = %lu\n", fs->storageCap);
-	printf("fs_dump: max fileno = %d\n", fs->maxFileNo);
-	printf("fs_dump: current filedata-occupied space = %lu\n", fs->spaceSize);
-	printf("fs_dump: current fileno = %d\n", fs->fmap->nentries);
-	printf("fs_dump: current files info:\n");
-	printf("---------------------------------\n");
+	fprintf(stream, "%s storage capacity (bytes) = %lu\n", FSDUMP_CYAN, fs->storageCap);
+	fprintf(stream, "%s max fileno = %d\n", FSDUMP_CYAN, fs->maxFileNo);
+	fprintf(stream, "%s current filedata-occupied space = %lu\n", FSDUMP_CYAN, fs->spaceSize);
+	fprintf(stream, "%s current fileno = %d\n", FSDUMP_CYAN, fs->fmap->nentries);
+	fprintf(stream, "%s current files info:\n", FSDUMP_CYAN);
+	fprintf(stream, "---------------------------------\n");
 	icl_hash_foreach(fs->fmap, tmpint, tmpentry, filename, file){
-		printf("file_dump: '%s'\n", filename);
-		printf("file dump: \tfile size = %lu\n", file->size);
-		printf("---------------------------------\n");
+		fprintf(stream, "%s '%s'\n", FSDUMP_CYAN, filename);
+		fprintf(stream, "%s \tfile size = %lu\n", FSDUMP_CYAN, file->size);
+		fprintf(stream, "---------------------------------\n");
 	}
-	printf("fs_dump: max file hosted = %d\n", fs->maxFileHosted);
-	printf("fs_dump: max storage size = %d\n", fs->maxSpaceSize);
-	printf("fs_dump: cache replacement algorithm executions = %d\n", fs->replCount);
-	printf("fs_dump: client info cleanup executions = %d\n", fs->cleanupCount);
-	printf("fs_dump: end\n");
+	fprintf(stream, "%s now dumping statistics\n", FSDUMP_CYAN);
+	fprintf(stream, "%s max file hosted = %d\n", FSDUMP_CYAN, fs->maxFileHosted);
+	fprintf(stream, "%s max storage size = %d\n", FSDUMP_CYAN, fs->maxSpaceSize);
+	fprintf(stream, "%s cache replacement algorithm executions = %d\n", FSDUMP_CYAN, fs->replCount);
+	fprintf(stream, "%s client info cleanup executions = %d\n", FSDUMP_CYAN, fs->cleanupCount);
 }

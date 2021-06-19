@@ -32,6 +32,7 @@
 #define DBGSTR(str) printf("[DEBUG] %s = %s\n", #str, str);
 #define DBGINT(num) printf("[DEBUG] %s = %d\n", #num, num);
 
+
 /* *********** SYSTEM CALLS ERRORS HANDLING MACROS *********** */
 
 /**
