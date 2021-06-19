@@ -389,7 +389,7 @@ typedef struct server_s {
 typedef struct wArgs_s {
 	server_t* server;
 	int workerId; /* Identifier [1, #workers] */
-	//TODO Aggiungere campi statistici (richieste ricevute e completate con successo ...)
+	int requests;
 } wArgs_t;
 
 /* File descriptor "switching" function */
@@ -660,6 +660,7 @@ void* server_worker(wArgs_t* wArgs){
 			}
 		}
 		/* Successfully received message */
+		wArgs->requests++;
 		switch(msg->type){
 			case M_OK:
 			case M_ERR:
@@ -841,6 +842,7 @@ int server_dump(server_t* server, wArgs_t** wArgsArray){
 			retval = -1;
 			break;
 		}
+		printf("%s thread worker #%d has received %d requests\n", SERVER_DUMP_CYAN, wArgsArray[i]->workerId, wArgsArray[i]->requests);
 		printf("%s thread worker #%d return value = %ld\n", SERVER_DUMP_CYAN, wArgsArray[i]->workerId, (long)wret);
 		if ((long)wret != 0) retval = 1;
 	}	

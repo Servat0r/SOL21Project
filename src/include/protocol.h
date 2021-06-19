@@ -57,8 +57,8 @@ typedef struct message_s {
 
 /* ************************************ Prototypes ************************************* */
 
-char*
-	print_reqtype(msg_t);
+int
+	print_reqtype(msg_t type, char* buf, size_t size);
 
 ssize_t
 	getArgn(msg_t);

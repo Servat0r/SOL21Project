@@ -76,23 +76,63 @@ ssize_t getArgn(msg_t type){
 	return -1; /* type is not valid */
 }
 
+
 /* Gets a string description of any message type */
-char* print_reqtype(msg_t type){
+int print_reqtype(msg_t type, char* buf, size_t size){
 	switch(type){
-		case M_OK: return "confirmation(s)\n";
-		case M_ERR: return "error(s)\n";
-		case M_READF: return "file read(s)\n";
-		case M_READNF: return "readNFiles request(s)\n";
-		case M_CLOSEF: return "file closing request(s)\n";
-		case M_LOCKF: return "file locking request(s)\n";
-		case M_UNLOCKF: return "file unlocking request(s)\n";
-		case M_REMOVEF: return "file removing request(s)\n";
-		case M_OPENF: return "file opening request(s)\n";
-		case M_WRITEF: return "writing content of file request(s)\n";
-		case M_APPENDF: return "appending content to file request(s)\n";
-		case M_GETF: return "file getting request(s)\n";
+		case M_OK: {
+			strncpy(buf, "success(es)", size);
+			break;
+		}
+		case M_ERR: {
+			strncpy(buf, "error(s)", size);
+			break;
+		} 
+		case M_READF: {
+			strncpy(buf, "file reading request(s)", size);
+			break;
+		} 
+		case M_READNF: {
+			strncpy(buf, "readNFiles request(s)", size);
+			break;
+		} 
+		case M_CLOSEF: {
+			strncpy(buf, "file closing request(s)", size);
+			break;
+		} 
+		case M_LOCKF: {
+			strncpy(buf, "file locking request(s)", size);
+			break;
+		} 
+		case M_UNLOCKF: {
+			strncpy(buf, "file unlocking request(s)", size);
+			break;
+		} 
+		case M_REMOVEF: {
+			strncpy(buf, "file removing request(s)", size);
+			break;
+		} 
+		case M_OPENF: {
+			strncpy(buf, "file opening request(s)", size);
+			break;
+		} 
+		case M_WRITEF: {
+			strncpy(buf, "writing content of file request(s)", size);
+			break;
+		} 
+		case M_APPENDF: {
+			strncpy(buf, "appending content to file request(s)", size);
+			break;
+		} 
+		case M_GETF: {
+			strncpy(buf, "file getting request(s)", size);
+			break;
+		}
+		default : {
+			return -1;
+		}
 	}
-	return NULL;
+	return 0;
 }
 
 
