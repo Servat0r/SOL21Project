@@ -13,10 +13,10 @@ bash -c 'sleep 10 && kill -1 ${SERVER_PID}' &
 TIMER_PID=$!
 
 # write 'file1' and 'file2' from subdir 'test1files', then read them from the server and store them in subdir 'test1dest1'
-bin/client -p -t 200 -f bin/tmp/serverSocket.sk -W test/test1files/file1, test/test1files/file2 -r ${SCRIPTPATH}/test1files/file1,${SCRIPTPATH}/test1files/file2 -d test/test1dest1
+bin/client -p -t 200 -f bin/tmp/serverSocket.sk -W test/test1files/file1, test/test1files/file2 -r ${SCRIPTPATH}/test1files/file1,${SCRIPTPATH}/test1files/file2 -d test/test1files/test1dest1
 
 # write all files and dirs in subdir 'test1files/rec', then read all files from the server and store them in subdir 'test1dest2'
-bin/client -p -t 200 -f bin/tmp/serverSocket.sk -w test/test1files/rec,0  -R 0 -d test/test1dest2
+bin/client -p -t 200 -f bin/tmp/serverSocket.sk -w test/test1files/rec,0  -R 0 -d test/test1files/test1dest2
 
 # lock a file and then delete it
 bin/client -p -t 200 -f bin/tmp/serverSocket.sk -l ${SCRIPTPATH}/test1files/file1 -c ${SCRIPTPATH}/test1files/file1

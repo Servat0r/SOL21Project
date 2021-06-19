@@ -1,3 +1,5 @@
 bin/
 notes/
-test/testIgnore/
+test/test1files/test1dest1/
+test/test1files/test1dest2/
+test/test2files/bigrecvs/
