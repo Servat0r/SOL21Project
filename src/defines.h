@@ -6,6 +6,9 @@
 #if !defined(_DEFINES_H)
 
 #define _DEFINES_H
+
+#define _POSIX_C_SOURCE 201112L
+
 #include <stdio.h>
 #include <stddef.h>
 #include <stdlib.h>
@@ -32,6 +35,9 @@
 #define DBGSTR(str) printf("[DEBUG] %s = %s\n", #str, str);
 #define DBGINT(num) printf("[DEBUG] %s = %d\n", #num, num);
 
+char* realpath(const char* path, char* resolved_path);
+
+int usleep(useconds_t usec);
 
 /* *********** SYSTEM CALLS ERRORS HANDLING MACROS *********** */
 

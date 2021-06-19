@@ -3,6 +3,7 @@
  *
  * @author Salvatore Correnti.
  */
+#include <defines.h>
 #include <util.h>
 #include <protocol.h>
 

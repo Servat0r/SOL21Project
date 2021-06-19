@@ -1,5 +1,5 @@
 CC		=  gcc
-CFLAGS	+= -Wall -g -pedantic
+CFLAGS	+= -Wall -g -pedantic -std=c99
 #Main directories
 SRC		= src
 BIN		= bin

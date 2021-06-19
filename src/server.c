@@ -16,6 +16,7 @@
 #include <server_support.h>
 #include <signal.h>
 #include <limits.h>
+#include <sys/select.h>
 
 /* Flags for server state (see below) */
 #define S_OPEN 0

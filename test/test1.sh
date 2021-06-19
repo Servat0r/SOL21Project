@@ -9,7 +9,7 @@ echo -e "${GREEN}Test is starting${RESET_COLOR}"
 valgrind --leak-check=full bin/server -c config1.txt &
 SERVER_PID=$!
 export SERVER_PID
-bash -c 'sleep 10 && kill -1 ${SERVER_PID}' &
+bash -c 'sleep 15 && kill -1 ${SERVER_PID}' &
 TIMER_PID=$!
 
 # write 'file1' and 'file2' from subdir 'test1files', then read them from the server and store them in subdir 'test1dest1'
