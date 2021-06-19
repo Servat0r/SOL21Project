@@ -648,16 +648,11 @@ void* server_worker(wArgs_t* wArgs){
 		recv_ret = mrecv(*cfd, &msg, "server_worker: mrecv", "server_worker: mrecv");
 		//In this case, cfd is ALWAYS freed
 		if (recv_ret == -1){
-			if (errno == EBADMSG){ /* connection closed */
-				/* Handles cleanup and sending back *cfd to manager */
-				SYSCALL_EXIT( server_cleanup_handler(server, cfd, &newowners) , "server_worker: while handling client cleanup");
-				free(cfd);
-				continue;
-			} else {
-				perror("server_worker: while getting message");
-				free(cfd);
-				break; /* Exits mainloop */
-			}
+			/* Handles cleanup and sending back *cfd to manager */
+			if (*cfd < 0) fd_switch(cfd);
+			SYSCALL_EXIT( server_cleanup_handler(server, cfd, &newowners) , "server_worker: while handling client cleanup");
+			free(cfd);
+			continue;
 		}
 		/* Successfully received message */
 		wArgs->requests++;
