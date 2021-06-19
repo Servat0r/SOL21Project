@@ -472,7 +472,7 @@ int server_cleanup_handler(server_t* server, int* cfd, llist_t** newowners){
  * parameters.
  * @return server_t object pointer on success, NULL on error.
  */
-server_t* server_init(config_t* config){
+server_t* server_init(config_t* config, sigset_t sigmask){
 	if (!config) return NULL;
 	
 	/* Checks correctness of config parameters as stated in config files */
@@ -491,7 +491,8 @@ server_t* server_init(config_t* config){
 	FD_ZERO(&server->clientset);
 	
 	/* Sets sigmask for pselect */
-	sigfillset(&server->psmask);
+	//sigfillset(&server->psmask);
+	server->psmask = sigmask;
 	sigdelset(&server->psmask, SIGINT);
 	sigdelset(&server->psmask, SIGQUIT);
 	sigdelset(&server->psmask, SIGHUP);
@@ -891,6 +892,7 @@ int main(int argc, char* argv[]){
 	wArgs_t** wArgsArray; /* Array of worker arguments */
 	struct sigaction sa_term, sa_ign; /* For registering signal handlers */
 	sigset_t sigmask; /* Sigmask for correct signal handling "dispatching" */
+	sigset_t oldmask;
 	llist_t* optvals; /* For parsing cmdline options */
 	char configFile[MAXPATHSIZE]; /* Path of configuration file */
 	memset(configFile, 0, sizeof(configFile));
@@ -898,12 +900,11 @@ int main(int argc, char* argv[]){
 	strncpy(configFile, DFL_CONFIG, strlen(DFL_CONFIG)+1);
 	/* Signals masking */
 	SYSCALL_EXIT(sigfillset(&sigmask), "sigfillset");
-	SYSCALL_EXIT(pthread_sigmask(SIG_SETMASK, &sigmask, NULL), "sigmask");
+	SYSCALL_EXIT(pthread_sigmask(SIG_SETMASK, &sigmask, &oldmask), "sigmask");
 	/* Termination signals */
 	memset(&sa_term, 0, sizeof(sa_term));
 	sa_term.sa_handler = term_sighandler;
 	SYSCALL_EXIT(sigaction(SIGHUP, &sa_term, NULL), "sigaction[SIGHUP]");
-	SYSCALL_EXIT(sigaction(SIGTSTP, &sa_term, NULL), "sigaction[SIGTSTP]");
 	SYSCALL_EXIT(sigaction(SIGINT, &sa_term, NULL), "sigaction[SIGINT]");
 	SYSCALL_EXIT(sigaction(SIGQUIT, &sa_term, NULL), "sigaction[SIGQUIT]");
 
@@ -912,6 +913,12 @@ int main(int argc, char* argv[]){
 	sa_ign.sa_handler = SIG_IGN;
 	SYSCALL_EXIT(sigaction(SIGPIPE, &sa_ign, NULL), "sigaction[SIGPIPE]");
 	
+	SYSCALL_EXIT(sigaddset(&oldmask, SIGINT), "sigaddset");
+	SYSCALL_EXIT(sigaddset(&oldmask, SIGQUIT), "sigaddset");
+	SYSCALL_EXIT(sigaddset(&oldmask, SIGHUP), "sigaddset");
+	
+	/* Resetting signals */
+	SYSCALL_EXIT(pthread_sigmask(SIG_SETMASK, &oldmask, NULL), "sigmask");
 	config_init(&config);
 	
 	/* Cmdline arguments parsing: if '-c' is NOT found, use default location for config.txt */
@@ -957,7 +964,7 @@ int main(int argc, char* argv[]){
 	SYSCALL_EXIT(icl_hash_destroy(dict, free, free), "icl_hash_destroy");
 
 	/* Initializing server */
-	server = server_init(&config);
+	server = server_init(&config, oldmask);
 	CHECK_COND_EXIT( (server != NULL), "server_init");
 	
 	config_reset(&config); /* Frees socketPath field memory */

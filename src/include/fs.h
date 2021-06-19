@@ -69,6 +69,7 @@ typedef struct FileStorage_s {
 	int maxSpaceSize; /* MAX(#dimensione dello storage) */
 	int replCount; /* #esecuzioni del cache replacemente */
 	int cleanupCount; /* #esecuzioni di fs_clientCleanup */
+	int evictedFiles; /* #files espulsi */
 
 } FileStorage_t;
 

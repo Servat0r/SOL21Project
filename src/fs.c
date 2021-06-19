@@ -149,7 +149,7 @@ static int fs_replace(FileStorage_t* fs, int client, int mode, size_t size, int 
 		printf("\033[1;31mfs_replace:\033[0m filename successfully extracted (type = \033[1;31m%s\033[0m), it is: \033[1;31m%s\033[0m\n",
 			(mode == R_CREATE ? "filecap_overflow" : "storagecap_overflow"), next);
 		file = icl_hash_find(fs->fmap, next);
-		if (!file) continue; /* File not existing anymore */
+		if (!file) return -1; /* File not existing anymore */
 		waitQueue = fdata_waiters(file);
 		if (!waitQueue) return -1; /* An error occurred, waiting queue is untouched (this error is NOT fatal!) */
 		if (sendBackHandler){ /* Passed an handler to send back file content (NULL for fs_create!) */
@@ -162,6 +162,7 @@ static int fs_replace(FileStorage_t* fs, int client, int mode, size_t size, int 
 		SYSCALL_NOTREC(waitHandler(chan, waitQueue), -1, "fs_replace: waitHandler");
 		/* We CANNOT avoid (at least a) memory leak */
 		SYSCALL_NOTREC(tsqueue_destroy(waitQueue, free), -1, "fs_replace: while destroying waiting queue");
+		fs->evictedFiles++; /* Updates statistics */
 		bcreate = (fs->fmap->nentries >= fs->maxFileNo) && (mode == R_CREATE); /* Conditions to expel a file for creating a new one */
 		bwrite = (fs->spaceSize + size > fs->storageCap) && (mode == R_WRITE); /* Conditions to expel a file for writing into an existing one */
 	} while (bcreate || bwrite);
@@ -795,5 +796,6 @@ void fs_dumpAll(FileStorage_t* fs, FILE* stream){ /* Dumps all files and storage
 	fprintf(stream, "%s max file hosted = %d\n", FSDUMP_CYAN, fs->maxFileHosted);
 	fprintf(stream, "%s max storage size = %d\n", FSDUMP_CYAN, fs->maxSpaceSize);
 	fprintf(stream, "%s cache replacement algorithm executions = %d\n", FSDUMP_CYAN, fs->replCount);
+	fprintf(stream, "%s total number of evicted files = %d\n", FSDUMP_CYAN, fs->evictedFiles);
 	fprintf(stream, "%s client info cleanup executions = %d\n", FSDUMP_CYAN, fs->cleanupCount);
 }
