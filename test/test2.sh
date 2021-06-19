@@ -7,7 +7,7 @@ echo -e "${GREEN}Test is starting${RESET_COLOR}"
 bin/server -c config2.txt &
 SERVER_PID=$!
 export SERVER_PID
-bash -c 'sleep 6 && kill -s SIGHUP ${SERVER_PID}' &
+bash -c 'sleep 4 && kill -s SIGHUP ${SERVER_PID}' &
 TIMER_PID=$!
 export TIMER_PID
 

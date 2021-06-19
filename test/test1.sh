@@ -1,4 +1,4 @@
-GREEN='\033[0;32m'
+GREEN='\033[1;32m'
 RESET_COLOR='\033[0m'
 # get absolute path of current directory for the -r flag (files are saved on the server using their absolute path)
 SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )" #.../SOL21Project/test
@@ -9,7 +9,7 @@ echo -e "${GREEN}Test is starting${RESET_COLOR}"
 valgrind --leak-check=full bin/server -c config1.txt &
 SERVER_PID=$!
 export SERVER_PID
-bash -c 'sleep 15 && kill -1 ${SERVER_PID}' &
+bash -c 'sleep 8 && kill -1 ${SERVER_PID}' &
 TIMER_PID=$!
 
 # write 'file1' and 'file2' from subdir 'test1files', then read them from the server and store them in subdir 'test1dest1'
