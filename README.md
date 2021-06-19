@@ -3,6 +3,9 @@ Operating Systems Project for the a.y. 2020/21.
 Project description (Italian) can be found here:
 http://didawiki.cli.di.unipi.it/lib/exe/fetch.php/informatica/sol/laboratorio21/progettosol-20_21.pdf
 
+WARNING: L'ultimo commit è stato effettuato dopo la consegna del progetto;
+l'ultimo commit prima della consegna del progetto è il #66.
+
 
 `argparser.h` - Parser of command-line arguments.
 

@@ -278,11 +278,15 @@ FileStorage_t* fs_init(int nbuckets, size_t storageCap, int maxFileNo){
 	fs->storageCap = storageCap;
 	
 	MTX_INIT(&fs->gblock, NULL);
+	CD_INIT(&fs->conds[0], NULL);
+	CD_INIT(&fs->conds[1], NULL);
 	
 	fs->replQueue = tsqueue_init();
 	if (!fs->replQueue){
 		perror("While initializing FIFO replacement queue");
 		MTX_DESTROY(&fs->gblock);
+		CD_DESTROY(&fs->conds[0]);
+		CD_DESTROY(&fs->conds[1]);
 		free(fs);
 		errno = ENOMEM;
 		return NULL;
@@ -290,6 +294,8 @@ FileStorage_t* fs_init(int nbuckets, size_t storageCap, int maxFileNo){
 	fs->fmap = icl_hash_create(nbuckets, NULL, NULL);
 	if (!fs->fmap){
 		MTX_DESTROY(&fs->gblock);
+		CD_DESTROY(&fs->conds[0]);
+		CD_DESTROY(&fs->conds[1]);
 		/* Unavoidable memory leak */
 		SYSCALL_NOTREC(tsqueue_destroy(fs->replQueue, dummy), NULL, "fs_init: while destroying FIFO replacement queue after error on initialization");
 		free(fs);
@@ -592,7 +598,7 @@ int fs_lock(FileStorage_t* fs, char* pathname, int client){
 	int res;
 	fs_rop_init(fs);		
 	file = fs_search(fs, pathname);
-	if (!file){ errno = ENOENT; return -1; }
+	if (!file){ fs_op_end(fs); errno = ENOENT; return -1; }
 	res = fdata_lock(file, client);
 	fs_op_end(fs);
 	return res;
@@ -646,7 +652,7 @@ int fs_remove(FileStorage_t* fs, char* pathname, int client, int (*waitHandler)(
 	
 	fs_wop_init(fs);
 	file = fs_search(fs, pathname);
-	if (!file){ errno = ENOENT; return -1; }
+	if (!file){ fs_op_end(fs); errno = ENOENT; return -1; }
 	if (file->clients[client] & LF_OWNER){ /* File is locked by calling client */
 		waitQueue = fdata_waiters(file);
 		if (!waitQueue){ /* waiting queue is untouched, operation fails with a (non necessarily) fatal error */
