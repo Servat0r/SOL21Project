@@ -304,7 +304,7 @@ do {\
 			HANDLE_SEND_RET(send_ret, cfd); /* "Embedded" CHECK_FATAL_EXIT(server) */\
 			if (send_ret == -1) break; /* Connection closed */\
 		}\
-		SYSCALL_EXIT(llist_destroy(*results, fcontent_destroy), "llist_destroy");\
+		SYSCALL_EXIT(llist_destroy(*results, (void(*)(void*))fcontent_destroy), "llist_destroy");\
 		if (send_ret == 0){ /* Connection still open, cfd NOT freed and > 0 */\
 			send_ret = msend(*cfd, &msg, M_OK, NULL, NULL);\
 			HANDLE_SEND_RET(send_ret, cfd);\
@@ -312,7 +312,7 @@ do {\
 	} else if (res == -1){\
 		perror(errmsg);\
 		error = errno;\
-		SYSCALL_EXIT(llist_destroy(*results, fcontent_destroy), "llist_destroy");\
+		SYSCALL_EXIT(llist_destroy(*results, (void(*)(void*))fcontent_destroy), "llist_destroy");\
 		send_ret = msend(*cfd, &msg, M_ERR, NULL, NULL, sizeof(error), &error);\
 		HANDLE_SEND_RET(send_ret, cfd);\
 	}\
@@ -410,7 +410,7 @@ int server_wHandler(int chan, tsqueue_t* waitQueue){
 	message_t* msg;
 	SYSCALL_NOTREC(tsqueue_iter_init(waitQueue), -1, "server_wHandler: while starting iteration");
 	while (true){
-		SYSCALL_NOTREC( (res1 = tsqueue_iter_next(waitQueue, &cfd)), -1, "server_wHandler: while iterating");
+		SYSCALL_NOTREC( (res1 = tsqueue_iter_next(waitQueue, (void**)&cfd)), -1, "server_wHandler: while iterating");
 		if (res1 != 0) break; /* Iteration ended */
 		if (!cfd) continue; /* NULL pointer in queue */
 		int send_ret = msend(*cfd, &msg, M_ERR, NULL, NULL,sizeof(error), &error);
@@ -454,7 +454,7 @@ int server_cleanup_handler(server_t* server, int* cfd, llist_t** newowners){
 	fd_switch(cfd); /* => < 0*/
 	FD_SENDBACK(server, cfd); /* Closed connection (sent back to server) */
 	while (true){
-		SYSCALL_RETURN( (popret = llist_pop(*newowners, &nextfd)), -1, "cleanup_handler: while getting next lock owner");
+		SYSCALL_RETURN( (popret = llist_pop(*newowners, (void**)&nextfd)), -1, "cleanup_handler: while getting next lock owner");
 		if (popret == 1) break;
 		send_ret = msend(*nextfd, &msg, M_OK, NULL, NULL);
 		HANDLE_SEND_RET(send_ret, nextfd);
@@ -634,7 +634,6 @@ void* server_worker(wArgs_t* wArgs){
 	int* cfd;
 	message_t* msg;
 	char* currFilePath;
-	size_t fpsize;
 	int recv_ret, send_ret;
 	int popret;
 	llist_t* newowners = llist_init(); /* For new lock owners unlocked during client cleanup */
@@ -644,8 +643,7 @@ void* server_worker(wArgs_t* wArgs){
 	}
 	while (true){
 		currFilePath = NULL;
-		fpsize = 0;
-		SYSCALL_EXIT( (qret = tsqueue_pop(server->connQueue, &cfd, false)) , "server_worker: tsqueue_pop");
+		SYSCALL_EXIT( (qret = tsqueue_pop(server->connQueue, (void**)&cfd, false)) , "server_worker: tsqueue_pop");
 		if (qret > 0) break; /* Queue closed and empty */
 		recv_ret = mrecv(*cfd, &msg, "server_worker: mrecv", "server_worker: mrecv");
 		//In this case, cfd is ALWAYS freed
@@ -673,7 +671,6 @@ void* server_worker(wArgs_t* wArgs){
 			
 			case M_READF: { /* filename */
 				currFilePath = msg->args[0].content;
-				fpsize = msg->args[0].len;
 				void* file_content;
 				size_t file_size;
 				READ_REQ_HANDLER(server, currFilePath, &file_content, &file_size, cfd, "fs_read");
@@ -694,7 +691,6 @@ void* server_worker(wArgs_t* wArgs){
 			
 			case M_CLOSEF: { /* filename */
 				currFilePath = msg->args[0].content;
-				fpsize = msg->args[0].len;
 				int res = 0;
 				SIMPLE_REQ_HANDLER(server, fs_close(server->fs, currFilePath, *cfd), fs_close, cfd, "error while handling request", &res);
 				break;
@@ -702,7 +698,6 @@ void* server_worker(wArgs_t* wArgs){
 
 			case M_LOCKF: { /* filename */
 				currFilePath = msg->args[0].content;
-				fpsize = msg->args[0].len;
 				int res = 0;
 				SIMPLE_REQ_HANDLER(server, fs_lock(server->fs, currFilePath, *cfd), fs_lock, cfd, "error while handling request", &res);
 				if (res == 1){ /* Need to wait for lock */
@@ -714,7 +709,6 @@ void* server_worker(wArgs_t* wArgs){
 
 			case M_UNLOCKF: { /* filename */
 				currFilePath = msg->args[0].content;
-				fpsize = msg->args[0].len;
 				int res = 0;
 				SIMPLE_REQ_HANDLER(server, fs_unlock(server->fs, currFilePath, *cfd, &newowners), fs_unlock, cfd, "error while handling request", &res);
 				break;
@@ -722,7 +716,6 @@ void* server_worker(wArgs_t* wArgs){
 
 			case M_REMOVEF: { /* filename */
 				currFilePath = msg->args[0].content;
-				fpsize = msg->args[0].len;
 				int res = 0;
 				SIMPLE_REQ_HANDLER(server, fs_remove(server->fs, currFilePath, *cfd, &server_wHandler, server->pfd[1]),
 					fs_remove, cfd, "error while handling request", &res);
@@ -731,7 +724,6 @@ void* server_worker(wArgs_t* wArgs){
 			
 			case M_OPENF: { /* filename, flags */
 				currFilePath = msg->args[0].content;
-				fpsize = msg->args[0].len;
 				int* flags = msg->args[1].content;
 				bool locking = (*flags & O_LOCK);
 				int res = 0;
@@ -751,7 +743,6 @@ void* server_worker(wArgs_t* wArgs){
 			case M_WRITEF: /* filename, content */
 			case M_APPENDF: { /* filename, content */
 				currFilePath = msg->args[0].content;
-				fpsize = msg->args[0].len;
 				void* content = msg->args[1].content;
 				size_t size = msg->args[1].len;
 				bool wr = (msg->type == M_WRITEF ? true : false);
@@ -786,7 +777,7 @@ void* server_worker(wArgs_t* wArgs){
 		/* Now cfd is ALWAYS NULL and freed */
 		/* Handle other(s) new lock owner(s) */
 		while (newowners->size > 0){
-			SYSCALL_RETURN( (popret = llist_pop(newowners, &cfd)), NULL, "server_worker: while getting next lock owner");
+			SYSCALL_RETURN( (popret = llist_pop(newowners, (void**)&cfd)), NULL, "server_worker: while getting next lock owner");
 			if (popret == 1) break;
 			send_ret = msend(*cfd, &msg, M_OK, NULL, NULL);
 			HANDLE_SEND_RET(send_ret, cfd);
@@ -820,7 +811,7 @@ int server_start(server_t* server, wArgs_t** wArgs){
 	CLS_CHAN_RETURN( server, (server->sockfd = socket(AF_UNIX, SOCK_STREAM, 0)), "server_start: socket");
 	CLS_CHAN_RETURN( server, bind(server->sockfd, (const struct sockaddr*)(&server->sa), UNIX_PATH_MAX), "server_start: bind");
 	CLS_CHAN_RETURN( server, listen(server->sockfd, server->sockBacklog), "server_start: listen");
-	CLS_CHAN_RETURN( server, wpool_runAll(server->wpool, &server_worker, (void**)wArgs), "server_start: wpool_runAll");
+	CLS_CHAN_RETURN( server, wpool_runAll(server->wpool, (void*(*)(void*))&server_worker, (void**)wArgs), "server_start: wpool_runAll");
 	FD_SET(server->sockfd, &server->saveset);
 	FD_SET(server->pfd[0], &server->saveset);
 	FD_SET(server->sockfd, &server->rdset);
@@ -942,7 +933,7 @@ int main(int argc, char* argv[]){
 			char* confpath = (char*)(currOpt->args->head->datum);
 			if (strlen(confpath)+1 > MAXPATHSIZE){
 				fprintf(stderr, "Error: config path too much long\n");
-				llist_destroy(optvals, optval_destroy);
+				llist_destroy(optvals, (void(*)(void*))optval_destroy);
 				exit(EXIT_FAILURE);
 			}
 			strncpy(configFile, confpath, strlen(confpath)+1);
@@ -950,7 +941,7 @@ int main(int argc, char* argv[]){
 		}
 	}
 	
-	llist_destroy(optvals, optval_destroy); /* Destroys parser result */
+	llist_destroy(optvals, (void(*)(void*))optval_destroy); /* Destroys parser result */
 	/* Now configFile is set either to default path or to provided path with '-c' */
 	
 	/* Parsing config file */

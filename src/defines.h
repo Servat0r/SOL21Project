@@ -39,6 +39,7 @@ char* realpath(const char* path, char* resolved_path);
 
 int usleep(useconds_t usec);
 
+
 /* *********** SYSTEM CALLS ERRORS HANDLING MACROS *********** */
 
 /**

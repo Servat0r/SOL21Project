@@ -38,7 +38,7 @@
 do { \
 	if ( !(cond) ){ \
 		fprintf(stderr, "%s\n", (errmsg ? errmsg : "An error occurred") ); \
-		llist_destroy(optvals, optval_destroy); \
+		llist_destroy(optvals, (void(*)(void*))optval_destroy); \
 		exit(EXIT_FAILURE); \
 	} \
 } while(0);
@@ -486,7 +486,7 @@ int main(int argc, char* argv[]){
 	CHECK_COND_DEALLOC_EXIT( (check_phft(optvals, &h_val, &f_path, &t_val) == 0), optvals, "Error while checking unique options");
 	CHECK_COND_DEALLOC_EXIT( (check_rwConsistency(optvals) == 0), optvals, "Error: options r/R/d or w/W/D are not provided correctly")
 	if (h_val){ /* Help option provided */
-		llist_destroy(optvals, optval_destroy);
+		llist_destroy(optvals, (void(*)(void*))optval_destroy);
 		print_help(argv[0], options, optlen);
 		return 0;		
 	}
@@ -499,7 +499,7 @@ int main(int argc, char* argv[]){
 	CHECK_COND_DEALLOC_EXIT( (runResult == 0), optvals, "Error while running commands");
 	CHECK_COND_DEALLOC_EXIT( (closeConnection(f_path) == 0), optvals, CLOSECONN_FAILMSG);
 	/* Dealloc and exit but with success */
-	llist_destroy(optvals, optval_destroy);
+	llist_destroy(optvals, (void(*)(void*))optval_destroy);
 	printf("Client successfully terminated\n");
 	return 0;
 }

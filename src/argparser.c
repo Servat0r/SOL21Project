@@ -329,14 +329,14 @@ llist_t* parseCmdLine(int argc, char* argv[], const optdef_t options[], const in
 	while (argc > 0){
 		opt = optval_init();
 		if (!opt){
-			llist_destroy(result, optval_destroy);
+			llist_destroy(result, (void(*)(void*))optval_destroy);
 			llist_destroy(uniques, dummy); /* No assumption can be made on 'options' elements allocation */
 			return NULL;		
 		}
 		ret = parseOption(argc, argv + index, options, optlen, opt, &offset);
 		if (ret < 0){
 			fprintf(stderr, "Error while parsing cmdline args: %s\n", printOptParseError(ret));
-			llist_destroy(result, optval_destroy);
+			llist_destroy(result, (void(*)(void*))optval_destroy);
 			llist_destroy(uniques, dummy); /* No assumption can be made on 'options' elements allocation */
 			optval_destroy(opt);
 			return NULL;
@@ -358,7 +358,7 @@ llist_t* parseCmdLine(int argc, char* argv[], const optdef_t options[], const in
 				argc -= ret;
 				index += ret;
 			} else { /* opt == NULL here <=> a duplicated unique option has been detected and so we return NULL */
-				llist_destroy(result, optval_destroy);
+				llist_destroy(result, (void(*)(void*))optval_destroy);
 				result = NULL;
 				break;
 			}

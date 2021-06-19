@@ -662,11 +662,11 @@ int fs_remove(FileStorage_t* fs, char* pathname, int client, int (*waitHandler)(
 		/* Removes filename from the replacement queue: failure here means possible aliasing with future files */
 		FS_NOTREC_UNLOCK(fs, tsqueue_iter_init(fs->replQueue), "fs_remove: while initializing iteration on replacement queue\n");
 		while (true){
-			FS_NOTREC_UNLOCK(fs, (res1 = tsqueue_iter_next(fs->replQueue, &pathcopy)), "fs_remove: while iterating on replacement queue\n");
+			FS_NOTREC_UNLOCK(fs, (res1 = tsqueue_iter_next(fs->replQueue, (void**)&pathcopy)), "fs_remove: while iterating on replacement queue\n");
 			if (res1 != 0) break;
 			if (!pathcopy) continue;
 			if ( strequal(pathname, pathcopy) ){
-				if ((res2 = tsqueue_iter_remove(fs->replQueue, &pathcopy)) == -1){ /* queue is untouched */
+				if ((res2 = tsqueue_iter_remove(fs->replQueue, (void**)&pathcopy)) == -1){ /* queue is untouched */
 					FS_NOTREC_UNLOCK(fs, tsqueue_iter_end(fs->replQueue), "fs_remove: while terminating iteration on queue");
 					errno = ENOTRECOVERABLE; /* "Phantom" filename in replacement queue */
 					fs_op_end(fs);

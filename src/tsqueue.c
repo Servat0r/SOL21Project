@@ -191,32 +191,6 @@ int tsqueue_pop(tsqueue_t* q, void** res, bool nonblocking){
 
 
 /**
- * @brief Returns a copy of the first N bytes of the first
- * element in the queue.
- * @note This function works even if the queue is closed.
- * @param copyFun -- Function used to copy the element in the
- * queue (default memcpy).
- * @return Pointer to heap-allocated copy of the first element,
- * NULL on error or if the queue is empty.
- */
-void* tsqueue_getHead(tsqueue_t* q, void*(*copyFun)(void* restrict dest, void* restrict src, size_t size), size_t N){
-	if (!q) return NULL;
-	LOCK(&q->lock);
-	if (tsqueue_isEmpty(q)) return NULL;
-	if (!copyFun){
-		size_t n = strlen(q->head->elem) + 1;
-		if (N > 0) N = MIN(N,n);
-		copyFun = memmove;
-	} else if (N == 0) return NULL; /* No correct copy is possible */
-	void* p = malloc(N);
-	if (!p) return NULL;
-	copyFun((char*)p, (char*)(q->head->elem), N);
-	UNLOCK(&q->lock);
-	return p;
-}
-
-
-/**
  * @brief Returns current size of the queue q.
  * @param s -- Pointer to size_t variabile in which
  * the result will be written.

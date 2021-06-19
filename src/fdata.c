@@ -372,7 +372,7 @@ int fdata_unlock(FileData_t* fdata, int client, llist_t** newowner){
 		fdata->clients[client] &= ~LF_OWNER;
 		int w;
 		/* nonblocking, unrecoverable error (file-lock CANNOT be reassigned) */
-		FD_NOTREC_UNLOCK(fdata, (w = tsqueue_pop(fdata->waiting, &n_own, true)) , "fdata_unlock: while extracting new owner from waiting queue");
+		FD_NOTREC_UNLOCK(fdata, (w = tsqueue_pop(fdata->waiting, (void**)&n_own, true)) , "fdata_unlock: while extracting new owner from waiting queue");
 		if (w > 0) fdata->flags &= ~O_LOCK; /* No one is waiting or queue is closed */
 		else if (w == 0){
 			fdata->clients[*n_own] &= ~LF_WAIT;
@@ -413,10 +413,10 @@ int fdata_removeClient(FileData_t* fdata, int client, llist_t** newowner){
 		int* r;
 		int res1, res2;
 		while (true){
-			FD_NOTREC_UNLOCK(fdata, (res1 = tsqueue_iter_next(fdata->waiting, &r)), "fdata_removeClient: while iterating on waiting queue");
+			FD_NOTREC_UNLOCK(fdata, (res1 = tsqueue_iter_next(fdata->waiting, (void**)&r)), "fdata_removeClient: while iterating on waiting queue");
 			if (res1 == 1) break; /* Iteration ended */
 			if (*r == client){
-				FD_NOTREC_UNLOCK(fdata, (res2 = tsqueue_iter_remove(fdata->waiting, &r)), "fdata_removeClient: while removing waiting client id");
+				FD_NOTREC_UNLOCK(fdata, (res2 = tsqueue_iter_remove(fdata->waiting, (void**)&r)), "fdata_removeClient: while removing waiting client id");
 				free(r);
 				break;
 			}

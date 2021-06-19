@@ -68,10 +68,6 @@ int
 	tsqueue_destroy(tsqueue_t* q, void(*freeQ)(void*));
 
 
-void*
-	tsqueue_getHead(tsqueue_t*, void*(*copyFun)(void*,void*,size_t), size_t);
-
-
 /**
  * @brief Iteration functions.
  */

@@ -141,7 +141,7 @@ int dirscan(const char nomedir[], long n, llist_t** filelist) {
    	int ret = 0;
    	
    	while (dlist->size > 0){
-   		ret = llist_pop(dlist, &currentdir); 
+   		ret = llist_pop(dlist, (void**)&currentdir); 
    		if (ret == -1){
    			fprintf(stderr, "Error while retrieving dir %s item into the queue\n", currentdir);
    			free(currentdir);
