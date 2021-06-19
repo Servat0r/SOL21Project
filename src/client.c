@@ -52,7 +52,7 @@ do { \
  * function return EXIT_FAILURE.
  * @note This macro processes correctly ONLY a list of char*.
  */
-#define MULTIARG_SIMPLE_HANDLER(apiFunc, args, ret) \
+#define MULTIARG_SIMPLE_HANDLER(apiFunc, args, ret, msec_delay) \
 do { \
 	*ret = 0; \
 	llistnode_t* node; \
@@ -69,6 +69,7 @@ do { \
 			*ret = -1;\
 			break;\
 		} \
+		usleep(1000 * msec_delay); /* Each argument is a new request */\
 	} \
 } while(0);
 
@@ -80,7 +81,7 @@ do { \
  * with locking permissions, then write file, then close file and
  * releases lock if file was opened/created in locked mode.
  */
-#define MULTIARG_TRANSACTION_HANDLER(apiFunc, args, dirname, openFlags, ret) \
+#define MULTIARG_TRANSACTION_HANDLER(apiFunc, args, dirname, openFlags, ret, msec_delay) \
 do {\
 	llistnode_t* node;\
 	char* filename;\
@@ -120,6 +121,7 @@ do {\
 				}\
 			}\
 		}\
+		usleep(1000 * msec_delay);\
 	}\
 } while(0);
 
@@ -270,7 +272,7 @@ int check_rwConsistency(llist_t* optvals){
  * if it is NOT existing it shall be created.
  * @return 0 on success, -1 on error.
  */
-int w_handler(optval_t* wopt, char* dirname){
+int w_handler(optval_t* wopt, char* dirname, long msec_delay){
 	if (!wopt) return -1;
 	long n = 0;
 	if (wopt->args->size == 2){
@@ -281,7 +283,7 @@ int w_handler(optval_t* wopt, char* dirname){
 	int ret = 0;
 	/* On success, filelist shall contain HEAP-allocated ABSOLUTE paths. */
 	SYSCALL_RETURN(dirscan(nomedir, n, &filelist), -1, "w_handler: while scanning directory");
-	MULTIARG_TRANSACTION_HANDLER(writeFile, filelist, dirname, (O_CREATE | O_LOCK), &ret);
+	MULTIARG_TRANSACTION_HANDLER(writeFile, filelist, dirname, (O_CREATE | O_LOCK), &ret, msec_delay);
 	llist_destroy(filelist, free);
 	return ret;
 }
@@ -304,7 +306,7 @@ int w_handler(optval_t* wopt, char* dirname){
  * @note Instead of w_handler, here we check for absolute
  * paths rather than getting them from a subcall.
  */
-int r_handler(optval_t* ropt, char* dirname){
+int r_handler(optval_t* ropt, char* dirname, long msec_delay){
 	if (!ropt) return -1;
 	int ret;
 	char* pathname;
@@ -352,6 +354,7 @@ int r_handler(optval_t* ropt, char* dirname){
 			filebuf = NULL;
 			filesize = 0;
 		}
+		usleep(1000 * msec_delay);
 	}
 	return ret;
 }
@@ -396,10 +399,9 @@ int client_run(llist_t* optvals, long msec_delay){
 					optval_t* nextOpt = (optval_t*)(node->next->datum);
 					if ( strequal(nextOpt->def->name, "-D") ) dirname = (char*)(nextOpt->args->head->datum); /* -D dirname */
 				}
-				if (optname[1] == 'w') ret = w_handler(opt, dirname);
+				if (optname[1] == 'w') ret = w_handler(opt, dirname, msec_delay);
 				else {
-					 
-					MULTIARG_TRANSACTION_HANDLER(writeFile, opt->args, dirname, (O_CREATE | O_LOCK), &ret);
+					MULTIARG_TRANSACTION_HANDLER(writeFile, opt->args, dirname, (O_CREATE | O_LOCK), &ret, msec_delay);
 				}
 				break;
 			}
@@ -412,7 +414,7 @@ int client_run(llist_t* optvals, long msec_delay){
 					optval_t* nextOpt = (optval_t*)(node->next->datum);
 					if ( strequal(nextOpt->def->name, "-d") ) dirname = (char*)(nextOpt->args->head->datum); /* -d dirname */
 				}
-				if (optname[1] == 'r') ret = r_handler(opt, dirname);
+				if (optname[1] == 'r') ret = r_handler(opt, dirname, msec_delay);
 				else { /* -R */
 					long lN = 0;
 					int N = 0;
@@ -426,32 +428,34 @@ int client_run(llist_t* optvals, long msec_delay){
 						if ((ret == -1) && (errno == EBADE)) ret = 0; /* As other handlers */
 						else if (ret >= 0) ret = 0; /* Uniform result */
 					}
-					/* with ret == -1, we do nothing */				
+					/* with ret == -1, we do nothing */
+					usleep(1000 * msec_delay);				
 				}
 				break;
 			}
 			
 			case 'l':
 			{
-				MULTIARG_SIMPLE_HANDLER(lockFile, opt->args, &ret);
+				MULTIARG_SIMPLE_HANDLER(lockFile, opt->args, &ret, msec_delay);
 				break;
 			}
 			
 			case 'u':
 			{
-				MULTIARG_SIMPLE_HANDLER(unlockFile, opt->args, &ret);
+				MULTIARG_SIMPLE_HANDLER(unlockFile, opt->args, &ret, msec_delay);
 				break;
 			}
 			
 			case 'c':
 			{
-				MULTIARG_SIMPLE_HANDLER(removeFile, opt->args, &ret);
+				MULTIARG_SIMPLE_HANDLER(removeFile, opt->args, &ret, msec_delay);
 				break;
 			}
 			
 			default: /* Theoretically impossible, but we consider it however */
 			{
 				fprintf(stderr, "Error while running command, unknown option got '%s'\n", optname);
+				usleep(1000 * msec_delay);
 				break;
 			}
 		} /* end of switch */
@@ -460,7 +464,6 @@ int client_run(llist_t* optvals, long msec_delay){
 			perror("client_run");
 			break;
 		}
-		usleep(1000 * msec_delay); /* delay between requests */
 	} /* end of llist_foreach */
 	return ret;
 }
