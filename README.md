@@ -38,5 +38,5 @@ http://didawiki.cli.di.unipi.it/lib/exe/fetch.php/informatica/sol/laboratorio21/
 
 `util.h` - Miscellaneous utility functions and macros.
 
-`config.txt` - Configuration file for server.
+`config1.txt`, `config2.txt`, `config3.txt` - Configuration files for server (each one for the corresponding bash test).
 

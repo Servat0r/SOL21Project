@@ -13,6 +13,17 @@
 #include <sys/timerfd.h>
 #include <dir_utils.h>
 
+/**
+ * CODICE NON-POSIX:
+ *	- La funzione openConnection utilizza le chiamate di sistema Linux-specific
+ *	definite in sys/timerfd.h per ottenere un timer che notifica via file descriptor.
+ *	In particolare, le funzioni utilizzate sono:
+ *	- timerfd_create: crea un nuovo timer e ritorna il file descriptor corrispondente;
+ *	- timerfd_settime: arma il timer, in questo caso la funzione è utilizzata SOLO per
+ *	avviare il timer, in quanto si specifica che questo dovrà scadere 1 sola volta, e
+ *	per chiuderlo si usa close().
+ */
+
 
 /** 
  * @brief Static global data for the current connection:

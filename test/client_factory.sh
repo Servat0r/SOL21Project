@@ -12,7 +12,7 @@ ABSFOLDER="${SCRIPTPATH}/${FOLDER}" #For -r
 
 echo -e "${GREEN}Client factory #$1 starting...${RESET_COLOR}"
 
-while [ $(date +%s) -lt $(($2 + 0)) ]; do #For showing that SIGINT effectively closes server even with > 0 active clients
+while true; do
 
 #Send folder and receive evicted files: each folder contains 10 files, thus having at most 40 server-requests for this client
 bin/client -f bin/tmp/serverSocket.sk -w "test/${FOLDER}" -D "test/test3files/recv_${folder_index}_0"
@@ -29,7 +29,7 @@ client_launched=$(($client_launched + 3))
 
 done
 
-sleep 1 #For printing out ALL final messages without overlapping with server/client messages
+sleep 0.5 #For printing out ALL final messages without overlapping with server/client messages
 
 echo -e "${GREEN}Client factory $1 terminated having launched ${client_launched} clients${RESET_COLOR}"
 

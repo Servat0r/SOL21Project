@@ -14,31 +14,36 @@ bin/server -c config3.txt &
 SERVER_PID=$!
 export SERVER_PID
 
-#We use this method for sending stop time to client factories in order to get how many client each factory has launched
-current_date=$(date +%s)
-stop_date=$(echo "$current_date + ${TEST_TIME}" | bc)
 
 #Background process for killing server after 30 seconds
 bash -c "sleep ${TEST_TIME} && kill -s SIGINT ${SERVER_PID}" &
+TIMER_PID=$!
 
-#Array of subprocesses ('client factories') that handle continuous client launching for at least 30 seconds.
+#Array of client factories that handle continuous client launching for at least 30 seconds.
 echo -e "${GREEN}Starting client factories...${RESET_COLOR}"
 pids=()
 for i in {0..10}; do
-    bash -c "test/client_factory.sh ${i} ${stop_date}" &
+    bash -c "test/client_factory.sh ${i}" &
     pids+=($!)
     sleep 0.1
 done
 
+
 #First we wait server to dump its results
+#All currently executing clients shall exit when receiving SIGPIPE 
 wait ${SERVER_PID}
+wait ${TIMER_PID}
 
-echo -e "${GREEN}Server ended${RESET_COLOR}"
+echo -e "${GREEN}Server ended with status $?${RESET_COLOR}"
 
-#Then we wait all client factories to dump how many client each one has launched
+#Then we kill all client factories to terminate test and wait them
 for i in "${pids[@]}"; do
+	kill -s SIGKILL ${i}
 	wait ${i}
 done
+
+#Kill all orphaned clients (if any)
+kill -s SIGKILL $(pidof client)
 
 #Finally we give confirmation of ending and exit
 echo -e "${GREEN}Test3 ended${RESET_COLOR}"

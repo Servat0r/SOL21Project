@@ -10,7 +10,8 @@ bin/server -c config3.txt &
 SERVER_PID=$!
 export SERVER_PID
 
-bash -c 'sleep 3 && kill -s SIGINT ${SERVER_PID}' &
+#Sends the signal specified as first argument
+bash -c "sleep 3 && kill -n $1 ${SERVER_PID}" &
 TIMER_PID=$!
 export TIMER_PID
 
@@ -25,8 +26,8 @@ bin/client -f ${SOCKET} -t 500 -w test/test3files/Files2 &
 
 done
 
-wait SERVER_PID
-wait TIMER_PID
+wait ${SERVER_PID}
+wait ${TIMER_PID}
 
 echo -e "${GREEN}Test ended${RESET}"
 
