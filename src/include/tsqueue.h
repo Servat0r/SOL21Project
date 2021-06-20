@@ -63,9 +63,12 @@ int
 	tsqueue_close(tsqueue_t*),
 	tsqueue_push(tsqueue_t*, void*),
 	tsqueue_pop(tsqueue_t*, void**, bool),
-	tsqueue_getSize(tsqueue_t*, size_t*),
 	tsqueue_flush(tsqueue_t* q, void(*freeItems)(void*)),
 	tsqueue_destroy(tsqueue_t* q, void(*freeQ)(void*));
+
+
+size_t
+	tsqueue_getSize(tsqueue_t*);
 
 
 /**

@@ -67,9 +67,11 @@ typedef struct FileStorage_s {
 	/* Statistics members (la mutua esclusione è garantita dal fatto che sono tutti modificati da operazioni che settano active_cwr) */
 	int maxFileHosted; /* MAX(#file ospitati) */
 	int maxSpaceSize; /* MAX(#dimensione dello storage) */
-	int replCount; /* #esecuzioni del cache replacemente */
+	int replCount; /* #esecuzioni del cache replacement */
 	int cleanupCount; /* #esecuzioni di fs_clientCleanup */
 	int evictedFiles; /* #files espulsi */
+	int fcap_replCount; /* #Esecuzioni del cache replacement per overflow del massimo numero di files */
+	int scap_replCount; /* #Esecuzioni del cache replacement per overflow della capacità di storage */
 
 } FileStorage_t;
 

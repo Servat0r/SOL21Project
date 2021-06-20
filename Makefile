@@ -8,6 +8,7 @@ BIN		= bin
 TEST	= test
 TEST1	= $(TEST)/test1files
 TEST2	= $(TEST)/test2files
+TEST3	= $(TEST)/test3files
 UNITTEST = $(TEST)/unittest
 OBJS	= bin/objects
 LIB		= bin/lib
@@ -62,6 +63,9 @@ test1 : server client
 	
 test2 : server client
 	test/test2.sh
+	
+test3: server client
+	test/test3.sh
 
 server : $(SRC)/server.c libserver.so
 	$(CC) $(includes) $(CFLAGS) $< -o $(BIN)/$@ $(LTHREAD) $(dlpath) -L $(LIB)/ -lserver
@@ -83,8 +87,8 @@ $(objects) : $(OBJS)/%.o : $(SRC)/%.c $(INCLUDE)/%.h $(hlib)
 
 
 clean :
-	-rm -r -d $(BIN) $(TEST1)/test1dest1 $(TEST1)/test1dest2 $(TEST2)/bigrecvs
+	-rm -r -d $(BIN) $(TEST1)/test1dest1 $(TEST1)/test1dest2 $(TEST2)/bigrecvs $(wildcard $(TEST3)/recv_*)
 
 cleanall :
-	-rm -r -d $(BIN) $(TEST1)/test1dest1 $(TEST1)/test1dest2 $(TEST2)/bigrecvs
+	-rm -r -d $(BIN) $(TEST1)/test1dest1 $(TEST1)/test1dest2 $(TEST2)/bigrecvs $(wildcard $(TEST3)/recv_*)
 

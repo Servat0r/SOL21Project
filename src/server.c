@@ -119,7 +119,6 @@ do {\
 	if (cfd == server->pfd[1]) break;\
 	if (cfd == server->sockfd) break;\
 	FD_SET(cfd, &server->clientset);\
-	FD_SET(cfd, &server->rdset);\
 	FD_SET(cfd, &server->saveset);\
 	server->nactives++;\
 	server->maxlisten = MAX(server->maxlisten, cfd);\
@@ -132,7 +131,6 @@ do {\
 	if (!FD_ISSET(cfd, &server->clientset)) break;\
 	close(cfd);\
 	FD_CLR(cfd, &server->clientset);\
-	FD_CLR(cfd, &server->rdset);\
 	FD_CLR(cfd, &server->saveset);\
 	server->nactives--;\
 	UPDATE_MAXLISTEN(server);\
@@ -375,6 +373,7 @@ typedef struct server_s {
 	/* Internal state for all active client connections */
 	int nactives; /* Number of active clients */
 	fd_set clientset; /* Active client connections */
+	int accepted;
 	
 	/* Internal state for ONLY listening client connections */
 	int maxlisten; /* Maximum listened file descriptor */
@@ -502,6 +501,7 @@ server_t* server_init(config_t* config, sigset_t sigmask){
 	server->sockfd = -1; /* No opened socket */
 	server->nactives = 0; /* No active connection */
 	server->maxlisten = -1; /* No listening */
+	server->accepted = 0;
 
 	/* Configures socket path */
 	memset(&server->sa, 0, sizeof(server->sa));
@@ -567,7 +567,7 @@ int server_manager(server_t* server){
 		if (pres == -1){
 			if (errno == EINTR){ /* Signal caught or other interrupt */
 				if (serverState != S_OPEN){
-					printf("\033[1;35mTermination signal caught\033[0m\n");
+					printf("\033[1;35mTermination signal caught (actives = %d) (enqueued = %lu)\033[0m\n", server->nactives, tsqueue_getSize(server->connQueue));
 					CLOSE_LSOCKET(server);
 				} /* No more connections (data in server->rdset are NOT valid!) */
 				if (serverState == S_CLOSED) continue;
@@ -601,6 +601,7 @@ int server_manager(server_t* server){
 				int newcfd;
 				SYSCALL_EXIT((newcfd = accept(server->sockfd, NULL, 0)), "server_manager: accept");
 				OPEN_CLCONN(server, newcfd);
+				server->accepted++;
 			}
 		}
 		/* Mainloop - 4 : Read from pipe and "restore listening" */
@@ -619,7 +620,7 @@ int server_manager(server_t* server){
 		}
 	} /* end of while loop */
 	tsqueue_close(server->connQueue); /* Unblocks all workers */
-	printf("Thread manager - exiting\n");
+	printf("\033[1;37mThread manager - exiting\033[0m\n");
 	return 0;
 }
 
@@ -639,7 +640,7 @@ void* server_worker(wArgs_t* wArgs){
 	int popret;
 	llist_t* newowners = llist_init(); /* For new lock owners unlocked during client cleanup */
 	if (!newowners){
-		printf("Thread worker #%d - exiting\n", wArgs->workerId);
+		printf("\033[1;37mThread worker #%d - exiting\033[0m\n", wArgs->workerId);
 		return (void*)1;
 	}
 	while (true){
@@ -652,7 +653,10 @@ void* server_worker(wArgs_t* wArgs){
 			/* Handles cleanup and sending back *cfd to manager */
 			if (*cfd < 0) fd_switch(cfd);
 			SYSCALL_EXIT( server_cleanup_handler(server, cfd, &newowners) , "server_worker: while handling client cleanup");
+			fd_switch(cfd); /* < 0 */
+			FD_SENDBACK(server, cfd);
 			free(cfd);
+			cfd = NULL;
 			continue;
 		}
 		/* Successfully received message */
@@ -715,7 +719,7 @@ void* server_worker(wArgs_t* wArgs){
 				currFilePath = msg->args[0].content;
 				int res = 0;
 				SIMPLE_REQ_HANDLER(server, fs_remove(server->fs, currFilePath, *cfd, &server_wHandler, server->pfd[1]),
-					fs_remove, cfd, "error while handling request", &res);
+					fs_remove, cfd, "server_worker: error while handling request", &res);
 				break;
 			}
 			
@@ -726,7 +730,7 @@ void* server_worker(wArgs_t* wArgs){
 				int res = 0;
 				if (*flags & O_CREATE){
 					SIMPLE_REQ_HANDLER(server, fs_create(server->fs, currFilePath, *cfd, locking, &server_wHandler, server->pfd[1]),
-						fs_create, cfd, "error while handling request", &res);
+						fs_create, cfd, "server_worker: error while handling request", &res);
 				} else {
 					SIMPLE_REQ_HANDLER(server, fs_open(server->fs, currFilePath, *cfd, locking), fs_open, cfd, "error while handling request", &res);
 				}
@@ -745,7 +749,7 @@ void* server_worker(wArgs_t* wArgs){
 				bool wr = (msg->type == M_WRITEF ? true : false);
 				int res = 0;
 				SIMPLE_REQ_HANDLER(server, fs_write(server->fs, currFilePath, content, size, *cfd, wr, &server_wHandler, &server_sbHandler, server->pfd[1]),
-					fs_write, cfd, "error while handling request", &res);
+					fs_write, cfd, "server_worker: error while handling request", &res);
 				break;
 			}			
 			default : {
@@ -783,7 +787,7 @@ void* server_worker(wArgs_t* wArgs){
 			cfd = NULL;	
 		}
 	} /* end of while loop */
-	printf("Worker #%d - exiting\n", wArgs->workerId);
+	printf("\033[1;37mWorker #%d - exiting\033[0m\n", wArgs->workerId);
 	SYSCALL_EXIT(llist_destroy(newowners, free), "Worker #%d - while destroying newowners queue\n");
 	return (void*)0;
 }
@@ -828,10 +832,12 @@ int server_dump(server_t* server, wArgs_t** wArgsArray){
 	int retval = 0;
 	if (!server) return -1;
 	printf("\033[1;36mSERVER DUMP\033[0m\n");
+	printf("%s total connections accepted = %d\n", SERVER_DUMP_CYAN, server->accepted);
 	printf("%s now dumping file storage information and statistics\n", SERVER_DUMP_CYAN);
 	fs_dumpAll(server->fs, stdout);
 	printf("%s now dumping workers information and statistics\n", SERVER_DUMP_CYAN);
 	void* wret;
+	int avg_req_per_client = 0;
 	for (int i = 0; i < server->wpool->nworkers; i++){
 		if (wpool_retval(server->wpool, i, &wret) != 0){
 			printf("%s error while fetching thread worker #%d return value\n", SERVER_DUMP_CYAN, i);
@@ -839,9 +845,12 @@ int server_dump(server_t* server, wArgs_t** wArgsArray){
 			break;
 		}
 		printf("%s thread worker #%d has received %d requests\n", SERVER_DUMP_CYAN, wArgsArray[i]->workerId, wArgsArray[i]->requests);
+		avg_req_per_client += wArgsArray[i]->requests;
 		printf("%s thread worker #%d return value = %ld\n", SERVER_DUMP_CYAN, wArgsArray[i]->workerId, (long)wret);
 		if ((long)wret != 0) retval = 1;
-	}	
+	}
+	printf("%s total requests received = %d\n", SERVER_DUMP_CYAN, avg_req_per_client);
+	printf("%s each client has sent ~%d requests\n", SERVER_DUMP_CYAN, avg_req_per_client/server->accepted);
 	printf("\033[1;36mSERVER DUMP\033[0m\n");
 	return retval;
 }

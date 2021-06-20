@@ -347,7 +347,7 @@ int	fs_create(FileStorage_t* fs, char* pathname, int client, bool locking, int (
 				if (repl == -1) perror("While updating cache");
 				fs_op_end(fs);
 				DELRET_FSCREATE(file, pathcopy1, pathcopy2, "fs_create: while destroying file after failure");
-			} else fs->replCount++; /* Cache replacement has been correctly executed */
+			} else { fs->fcap_replCount++; fs->replCount++; }/* Cache replacement has been correctly executed */
 		} /* We don't need to repeat the search here */
 	}
 	/* Inserts new mapping in the hash table */
@@ -554,7 +554,7 @@ int	fs_write(FileStorage_t* fs, char* pathname, void* buf, size_t size, int clie
 				if (repl == -1) perror("While updating cache");
 				fs_op_end(fs);
 				return -1;
-			} else fs->replCount++; /* Correct execution of cache replacement */
+			} else { fs->scap_replCount++; fs->replCount++; }/* Correct execution of cache replacement */
 		}
 		fs_op_downgrade(fs); /* From "writer" to "reader" */
 		/* Here we need to repeat the search because the file can have been expelled by the replacement algorithm */
@@ -795,7 +795,9 @@ void fs_dumpAll(FileStorage_t* fs, FILE* stream){ /* Dumps all files and storage
 	fprintf(stream, "%s now dumping statistics\n", FSDUMP_CYAN);
 	fprintf(stream, "%s max file hosted = %d\n", FSDUMP_CYAN, fs->maxFileHosted);
 	fprintf(stream, "%s max storage size = %d\n", FSDUMP_CYAN, fs->maxSpaceSize);
-	fprintf(stream, "%s cache replacement algorithm executions = %d\n", FSDUMP_CYAN, fs->replCount);
-	fprintf(stream, "%s total number of evicted files = %d\n", FSDUMP_CYAN, fs->evictedFiles);
+	fprintf(stream, "%s cache replacement algorithm executions for file cap overflowing = %d\n", FSDUMP_CYAN, fs->fcap_replCount);
+	fprintf(stream, "%s cache replacement algorithm executions for storage cap overflowing = %d\n", FSDUMP_CYAN, fs->scap_replCount);
+	fprintf(stream, "%s TOTAL cache replacement algorithm executions = %d\n", FSDUMP_CYAN, fs->replCount);
+	fprintf(stream, "%s TOTAL number of evicted files = %d\n", FSDUMP_CYAN, fs->evictedFiles);
 	fprintf(stream, "%s client info cleanup executions = %d\n", FSDUMP_CYAN, fs->cleanupCount);
 }

@@ -192,16 +192,12 @@ int tsqueue_pop(tsqueue_t* q, void** res, bool nonblocking){
 
 /**
  * @brief Returns current size of the queue q.
- * @param s -- Pointer to size_t variabile in which
- * the result will be written.
- * @return 0 on success, -1 on error.
  */
-int tsqueue_getSize(tsqueue_t* q, size_t* s){
-	if (!q) return -1;
+size_t tsqueue_getSize(tsqueue_t* q){
 	LOCK(&q->lock);
-	*s = q->size;
+	size_t s = q->size;
 	UNLOCK(&q->lock);
-	return 0;
+	return s;
 }
 
 /**
