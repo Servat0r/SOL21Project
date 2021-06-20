@@ -227,7 +227,7 @@ llist_t* splitArgs(char* str){
  *	-4: option is provided with more than its maximum number of arguments;
  *	-5: option is provided with one (or more) invalid arguments.
  */
-int parseOption(int argc, char* argv[], const optdef_t options[], const int optlen, optval_t* opt, int* offset){
+int parseOption(int argc, char* argv[], optdef_t options[], int optlen, optval_t* opt, int* offset){
 	if (!argv || !options || !opt || (optlen < 0) || (argc < 1)) return -1;
 	int ret = 0; /* Return value on success */
 	if (!offset) *offset = 0;
@@ -312,7 +312,7 @@ char* printOptParseError(int err){
  * @note By default, if a unique option is found a second time, this function fails.
  * @note On error, this function returns NULL as if parsing has never started.
  */
-llist_t* parseCmdLine(int argc, char* argv[], const optdef_t options[], const int optlen){
+llist_t* parseCmdLine(int argc, char* argv[], optdef_t options[], int optlen){
 	if (!argv || !options || (optlen < 0) || (argc < 0)) return NULL;
 	llist_t* result = llist_init();
 	if (!result) return NULL;

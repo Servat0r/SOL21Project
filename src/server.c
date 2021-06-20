@@ -318,13 +318,13 @@ do {\
 
 
 /* Options accepted by server */
-const optdef_t options[] = {
+optdef_t options[] = {
 	{"-c", 1, 1, allPaths, true, "path", "path of the configuration file (default is \"../config.txt\")"}
 	/* Add other options here */
 };
 
 /* Length of options array */
-const int optlen = 1;
+int optlen = 1;
 
 
 /**

@@ -1,7 +1,7 @@
 #Generals
 SHELL	:= /bin/bash
 CC		=  gcc
-CFLAGS	+= -Wall -g -pedantic -pthread -std=c99 -Wno-discarded-qualifiers
+CFLAGS	+= -Wall -g -pedantic -pthread -std=c99
 #Main directories
 SRC		= src
 BIN		= bin
@@ -87,8 +87,8 @@ $(objects) : $(OBJS)/%.o : $(SRC)/%.c $(INCLUDE)/%.h $(hlib)
 
 
 clean :
-	-rm -r -d $(BIN) $(TEST1)/test1dest1 $(TEST1)/test1dest2 $(TEST2)/bigrecvs $(wildcard $(TEST3)/recv_*)
+	-rm -r -d $(BIN) $(TEST1)/test1dest1 $(TEST1)/test1dest2 $(TEST2)/bigrecvs $(TEST3)/recv_*
 
 cleanall :
-	-rm -r -d $(BIN) $(TEST1)/test1dest1 $(TEST1)/test1dest2 $(TEST2)/bigrecvs $(wildcard $(TEST3)/recv_*)
+	-rm -r -d $(BIN) $(TEST1)/test1dest1 $(TEST1)/test1dest2 $(TEST2)/bigrecvs $(TEST3)/recv_*
 

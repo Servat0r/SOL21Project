@@ -141,7 +141,7 @@ do {\
 /**
  * @brief Global array that contains all accepted options.
  */
-const optdef_t options[] = {
+optdef_t options[] = {
 	{"-h", 0, 0, allNumbers, true, NULL, "Shows this help message and exits"},
 
 	{"-f", 1, 1, allPaths, true, "filename", "name of the socket to connect with"},
@@ -177,7 +177,7 @@ otherwise an error is raised; if this option is not specified at least once, all
 };
 
 /* Length of options array */
-const int optlen = 13;
+int optlen = 13;
 
 /**
  * @brief Global variables for saving whether unique options 

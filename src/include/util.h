@@ -22,8 +22,8 @@
 
 bool 
 	isUseless(char*),
-	isPath(char*),
-	isAbsPath(char*),
+	isPath(const char*),
+	isAbsPath(const char*),
 	strtoupper(char*, const char*, size_t),
 	strequal(char*, char*),
 	isNumber(char* str),

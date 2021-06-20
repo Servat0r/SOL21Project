@@ -55,9 +55,9 @@ bool
 /* Main cmdline parsing functions */
 bool issubstr(char* str1, char* str2);
 llist_t* splitArgs(char* str);
-int parseOption(int argc, char* argv[], const optdef_t options[], const int optlen, optval_t* opt, int* offset);
+int parseOption(int argc, char* argv[], optdef_t options[], int optlen, optval_t* opt, int* offset);
 char* printOptParseError(int err);
-llist_t* parseCmdLine(int argc, char* argv[], const optdef_t options[], const int optlen);
+llist_t* parseCmdLine(int argc, char* argv[], optdef_t options[], int optlen);
 
 /* Options help message(s) printing function */
 void print_help(const char* progname, const optdef_t options[], const int optlen);

@@ -22,13 +22,13 @@ bool isUseless(char* input){
 	return res;
 }
 
-bool isPath(char* pathname){ return (pathname ? true : false); }
+bool isPath(const char* pathname){ return (pathname ? true : false); }
 
 /**
  * @brief Checks if a path is absolute, i.e. if it starts with '/'.
  * @note Absolute path does NOT mean existing path.
 */
-bool isAbsPath(char* pathname){
+bool isAbsPath(const char* pathname){
 	if (!pathname) return false;
 	size_t n = strlen(pathname);
 	if (n == 0) return false; /* An empty path is not interesting */

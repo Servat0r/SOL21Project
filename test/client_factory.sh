@@ -21,7 +21,7 @@ bin/client -f bin/tmp/serverSocket.sk -w "test/${FOLDER}" -D "test/test3files/re
 bin/client -f bin/tmp/serverSocket.sk -r ${ABSFOLDER}/file0, ${ABSFOLDER}/file1, ${ABSFOLDER}/file2, ${ABSFOLDER}/file3, ${ABSFOLDER}/file4\
  -d "test/test3files/recv_${folder_index}_1"
 
-#Read and save last 5 files, then do a readN: as above for server-requests
+#Read and save last 5 files: as above for server-requests
 bin/client -f bin/tmp/serverSocket.sk -r ${ABSFOLDER}/file5, ${ABSFOLDER}/file6, ${ABSFOLDER}/file7, ${ABSFOLDER}/file8, ${ABSFOLDER}/file9\
  -d "test/test3files/recv_${folder_index}_2"
 
