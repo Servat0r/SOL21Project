@@ -9,7 +9,6 @@ TEST	= test
 TEST1	= $(TEST)/test1files
 TEST2	= $(TEST)/test2files
 TEST3	= $(TEST)/test3files
-UNITTEST = $(TEST)/unittest
 OBJS	= bin/objects
 LIB		= bin/lib
 INCLUDE	= src/include
@@ -41,10 +40,6 @@ client_objs := $(client_headers:$(INCLUDE)/%.h=$(OBJS)/%.o)
 #ALL objects
 objects := $(common_objs) $(server_objs) $(client_objs)
 
-#Unittest source files
-src_unittests := $(wildcard $(UNITTEST)/*.c)
-#Unittest binaries
-bin_unittests := $(src_unittests:$(UNITTEST)/%.c=$(UNITTEST)/%)
 #Dynamic linking path
 dlpath := -Wl,-rpath,$(LIB)
 #Included directories for compilation
