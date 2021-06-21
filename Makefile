@@ -70,18 +70,13 @@ test3:
 	make all;
 	test/test3.sh
 
-server : $(SRC)/server.c libserver.so
-	$(CC) $(includes) $(CFLAGS) $< -o $(BIN)/$@ $(LTHREAD) $(dlpath) -L $(LIB)/ -lserver
+server : $(SRC)/server.c libshared.so
+	$(CC) $(includes) $(CFLAGS) $< -o $(BIN)/$@ $(LTHREAD) $(dlpath) -L $(LIB)/ -lshared
 	
-client : $(SRC)/client.c libapi.so
-	$(CC) $(includes) $(CFLAGS) $< -o $(BIN)/$@ $(LTHREAD) $(dlpath) -L $(LIB)/ -lapi
+client : $(SRC)/client.c libshared.so
+	$(CC) $(includes) $(CFLAGS) $< -o $(BIN)/$@ $(LTHREAD) $(dlpath) -L $(LIB)/ -lshared
 
-#Server library
-libserver.so : $(server_objs) $(common_objs)
-	$(CC) -shared $^ -o $(LIB)/$@  $(LTHREAD)
-
-#Client library
-libapi.so : $(client_objs) $(common_objs)
+%.so : $(objects)
 	$(CC) -shared $^ -o $(LIB)/$@ $(LTHREAD)
 
 #ALL objects
