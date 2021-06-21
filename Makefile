@@ -54,17 +54,20 @@ includes := -I $(SRC)/ -I $(INCLUDE)/
 #Generals
 
 all :
-	mkdir -p bin/lib bin/objects bin/test bin/tmp; #Create bin folders if absent
+	-mkdir -p bin/lib bin/objects bin/test bin/tmp; #Create bin folders if absent
 	make server;
 	make client
 	
-test1 : server client
+test1 :
+	make all;
 	test/test1.sh
 	
-test2 : server client
+test2 :
+	make all;
 	test/test2.sh
 	
-test3: server client
+test3:
+	make all;
 	test/test3.sh
 
 server : $(SRC)/server.c libserver.so

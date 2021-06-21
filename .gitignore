@@ -3,3 +3,4 @@ notes/
 test/test1files/test1dest1/
 test/test1files/test1dest2/
 test/test2files/bigrecvs/
+test/test3files/recv_*
